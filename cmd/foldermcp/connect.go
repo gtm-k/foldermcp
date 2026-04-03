@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var connectMode string
+
 var connectCmd = &cobra.Command{
 	Use:   "connect <client>",
 	Short: "Configure a client to use this FolderMCP server",
@@ -20,6 +22,7 @@ configuration. Currently supports: claude-desktop.`,
 }
 
 func init() {
+	connectCmd.Flags().StringVar(&connectMode, "mode", "dev", "Server mode to use (dev, team, production)")
 	rootCmd.AddCommand(connectCmd)
 }
 
@@ -74,7 +77,7 @@ func connectClaudeDesktop() error {
 	// Build the mcpServers entry.
 	serverEntry := map[string]interface{}{
 		"command": binaryPath,
-		"args":    []string{"serve", "--mode=dev"},
+		"args":    []string{"serve", "--mode=" + connectMode},
 		"cwd":     cwd,
 	}
 
@@ -97,8 +100,12 @@ func connectClaudeDesktop() error {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, output, 0644); err != nil {
-		return fmt.Errorf("write Claude Desktop config: %w", err)
+	tmpPath := configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, output, 0644); err != nil {
+		return fmt.Errorf("writing temp config: %w", err)
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
+		return fmt.Errorf("renaming config: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Updated %s\n", configPath)

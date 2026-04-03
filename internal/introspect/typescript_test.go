@@ -1,6 +1,7 @@
 package introspect
 
 import (
+	"context"
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,7 @@ func TestTypeScriptIntrospector_ExtractTools(t *testing.T) {
 
 	ts := &TypeScriptIntrospector{}
 	filePath := filepath.Join(testdataDir(), "typescript_simple", "math_tools.ts")
-	tools, err := ts.ExtractTools(filePath)
+	tools, err := ts.ExtractTools(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("ExtractTools() error: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestTypeScriptIntrospector_ExtractTools_JSCommonJS(t *testing.T) {
 
 	ts := &TypeScriptIntrospector{}
 	filePath := filepath.Join(testdataDir(), "typescript_simple", "api_client.js")
-	tools, err := ts.ExtractTools(filePath)
+	tools, err := ts.ExtractTools(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("ExtractTools() error: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestTypeScriptIntrospector_InferDependencies(t *testing.T) {
 
 	ts := &TypeScriptIntrospector{}
 	filePath := filepath.Join(testdataDir(), "typescript_simple", "api_client.js")
-	deps, err := ts.InferDependencies(filePath)
+	deps, err := ts.InferDependencies(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("InferDependencies() error: %v", err)
 	}

@@ -1,6 +1,7 @@
 package introspect
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,7 @@ func TestShellIntrospector_CanHandle(t *testing.T) {
 func TestShellIntrospector_ExtractTools(t *testing.T) {
 	s := &ShellIntrospector{}
 	filePath := filepath.Join(testdataDir(), "shell_simple", "deploy.sh")
-	tools, err := s.ExtractTools(filePath)
+	tools, err := s.ExtractTools(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("ExtractTools() error: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestShellIntrospector_ExtractTools(t *testing.T) {
 func TestShellIntrospector_ExtractTools_HealthCheck(t *testing.T) {
 	s := &ShellIntrospector{}
 	filePath := filepath.Join(testdataDir(), "shell_simple", "health_check.sh")
-	tools, err := s.ExtractTools(filePath)
+	tools, err := s.ExtractTools(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("ExtractTools() error: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestShellIntrospector_ExtractTools_HealthCheck(t *testing.T) {
 func TestShellIntrospector_InferDependencies(t *testing.T) {
 	s := &ShellIntrospector{}
 	filePath := filepath.Join(testdataDir(), "shell_simple", "deploy.sh")
-	deps, err := s.InferDependencies(filePath)
+	deps, err := s.InferDependencies(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("InferDependencies() error: %v", err)
 	}

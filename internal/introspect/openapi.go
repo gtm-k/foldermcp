@@ -24,7 +24,7 @@ func (o *OpenAPIIntrospector) CanHandle(filePath string) bool {
 }
 
 // ExtractTools parses an OpenAPI spec and returns tool metadata for each operation.
-func (o *OpenAPIIntrospector) ExtractTools(filePath string) ([]ToolMetadata, error) {
+func (o *OpenAPIIntrospector) ExtractTools(ctx context.Context, filePath string) ([]ToolMetadata, error) {
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromFile(filePath)
 	if err != nil {
@@ -32,7 +32,7 @@ func (o *OpenAPIIntrospector) ExtractTools(filePath string) ([]ToolMetadata, err
 		return nil, nil
 	}
 
-	if err := doc.Validate(context.Background()); err != nil {
+	if err := doc.Validate(ctx); err != nil {
 		// File loaded but is not a valid OpenAPI spec — return empty list.
 		return nil, nil
 	}
@@ -89,7 +89,7 @@ func (o *OpenAPIIntrospector) ExtractTools(filePath string) ([]ToolMetadata, err
 }
 
 // InferDependencies returns nil -- OpenAPI specs have no code dependencies.
-func (o *OpenAPIIntrospector) InferDependencies(filePath string) ([]Dependency, error) {
+func (o *OpenAPIIntrospector) InferDependencies(ctx context.Context, filePath string) ([]Dependency, error) {
 	return nil, nil
 }
 

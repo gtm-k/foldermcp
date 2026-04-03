@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
+
+	"github.com/foldermcp/foldermcp/internal/pythonrt"
 )
 
 // ExecutorConfig controls resource limits for subprocess execution.
@@ -43,22 +47,9 @@ func NewExecutor(config ExecutorConfig) *Executor {
 	return &Executor{config: config}
 }
 
-// findPython locates a usable Python interpreter. It tries python3 first,
-// then python, verifying the binary actually works (on Windows, python3 may
-// be a Microsoft Store shim that does not execute).
+// findPython delegates to the shared pythonrt package.
 func findPython() (string, error) {
-	for _, name := range []string{"python3", "python"} {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			continue
-		}
-		// Verify the binary actually runs (avoids Windows App Alias shims).
-		cmd := exec.Command(path, "--version")
-		if err := cmd.Run(); err == nil {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("neither python3 nor python found in PATH")
+	return pythonrt.FindPython()
 }
 
 // RunPython runs a Python code string as a subprocess.
@@ -79,8 +70,11 @@ func (e *Executor) RunPython(ctx context.Context, code string, venvPath string, 
 	// Build environment: inherit current env, add venv PATH, then extras.
 	cmdEnv := os.Environ()
 	if venvPath != "" {
-		// Prepend venv bin to PATH.
-		binDir := venvPath + "/bin"
+		// Prepend venv bin to PATH (Scripts on Windows, bin elsewhere).
+		binDir := filepath.Join(venvPath, "bin")
+		if runtime.GOOS == "windows" {
+			binDir = filepath.Join(venvPath, "Scripts")
+		}
 		for i, v := range cmdEnv {
 			if strings.HasPrefix(v, "PATH=") {
 				cmdEnv[i] = "PATH=" + binDir + string(os.PathListSeparator) + v[5:]

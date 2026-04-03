@@ -70,7 +70,7 @@ def subtract(x: int, y: int) -> int:
 	defer store.Close()
 
 	registry := introspect.NewRegistry()
-	tools, err := registry.ScanDirectory(workDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools, err := registry.ScanDirectory(context.Background(), workDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestConfigToStateStore_ModifyConfigRescan(t *testing.T) {
 	// Initial scan with default config.
 	cfg := config.DefaultConfig()
 	registry := introspect.NewRegistry()
-	tools, err := registry.ScanDirectory(workDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools, err := registry.ScanDirectory(context.Background(), workDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestConfigToStateStore_ModifyConfigRescan(t *testing.T) {
 	}
 
 	// Re-scan (simulates config change + re-init). Verify state is preserved.
-	tools2, err := registry.ScanDirectory(workDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools2, err := registry.ScanDirectory(context.Background(), workDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		t.Fatalf("re-scan: %v", err)
 	}
@@ -226,7 +226,7 @@ def multiply(x: float, y: float) -> float:
 	// Scan and upsert.
 	cfg := config.DefaultConfig()
 	registry := introspect.NewRegistry()
-	tools, err := registry.ScanDirectory(workDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools, err := registry.ScanDirectory(context.Background(), workDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestIntrospectToStateStore_AddNewFilePreservesApprovals(t *testing.T) {
 	defer store.Close()
 
 	// First scan.
-	tools, err := registry.ScanDirectory(workDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools, err := registry.ScanDirectory(context.Background(), workDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		t.Fatalf("scan 1: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestIntrospectToStateStore_AddNewFilePreservesApprovals(t *testing.T) {
 `)
 
 	// Re-scan.
-	tools2, err := registry.ScanDirectory(workDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools2, err := registry.ScanDirectory(context.Background(), workDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		t.Fatalf("scan 2: %v", err)
 	}
@@ -605,7 +605,7 @@ def fetch_data(url: str) -> str:
 
 	// Introspect dependencies.
 	intro := &introspect.PythonIntrospector{}
-	depsList, err := intro.InferDependencies(pyPath)
+	depsList, err := intro.InferDependencies(context.Background(), pyPath)
 	if err != nil {
 		t.Fatalf("InferDependencies: %v", err)
 	}
@@ -1040,7 +1040,7 @@ paths:
 	}
 
 	intro := &introspect.OpenAPIIntrospector{}
-	tools, err := intro.ExtractTools(specPath)
+	tools, err := intro.ExtractTools(context.Background(), specPath)
 	if err != nil {
 		t.Fatalf("ExtractTools: %v", err)
 	}
@@ -1133,7 +1133,7 @@ def dangerous_tool(path: str) -> str:
 
 	// Introspect.
 	registry := introspect.NewRegistry()
-	tools, err := registry.ScanDirectory(workDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools, err := registry.ScanDirectory(context.Background(), workDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,6 +39,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
+	// Validate directory exists.
+	info, err := os.Stat(absDir)
+	if err != nil {
+		return fmt.Errorf("directory does not exist: %s", absDir)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("not a directory: %s", absDir)
+	}
+
 	// Load or create config.
 	cfg, err := config.Load(absDir)
 	if err != nil {
@@ -64,7 +74,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Scan directory.
 	start := time.Now()
 	registry := introspect.NewRegistry()
-	tools, err := registry.ScanDirectory(absDir, cfg.Scan.Include, cfg.Scan.Exclude)
+	tools, err := registry.ScanDirectory(context.Background(), absDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		return fmt.Errorf("scan directory: %w", err)
 	}

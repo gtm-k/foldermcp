@@ -106,5 +106,9 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	if result.ExitCode != 0 {
+		return fmt.Errorf("tool exited with code %d", result.ExitCode)
+	}
+
 	return nil
 }

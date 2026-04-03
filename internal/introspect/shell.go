@@ -2,6 +2,7 @@ package introspect
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ func (s *ShellIntrospector) CanHandle(filePath string) bool {
 // derived from the filename (minus extension). The description is taken from
 // the first comment line that is not a shebang (#!). If no suitable comment
 // is found, a default "Runs <filename>" description is used.
-func (s *ShellIntrospector) ExtractTools(filePath string) ([]ToolMetadata, error) {
+func (s *ShellIntrospector) ExtractTools(_ context.Context, filePath string) ([]ToolMetadata, error) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve path: %w", err)
@@ -53,7 +54,7 @@ func (s *ShellIntrospector) ExtractTools(filePath string) ([]ToolMetadata, error
 
 // InferDependencies returns nil for shell scripts. Shell scripts manage their
 // own dependencies through the system PATH and package managers.
-func (s *ShellIntrospector) InferDependencies(filePath string) ([]Dependency, error) {
+func (s *ShellIntrospector) InferDependencies(_ context.Context, filePath string) ([]Dependency, error) {
 	return nil, nil
 }
 

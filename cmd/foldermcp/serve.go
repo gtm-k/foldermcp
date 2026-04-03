@@ -41,7 +41,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	_, err = config.Load(dir)
+	cfg, err := config.Load(dir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -99,6 +99,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Print status to stderr (stdout is reserved for MCP protocol).
 	fmt.Fprintf(os.Stderr, "FolderMCP server starting (mode=%s, tools=%d)\n", mode, enabledCount)
+	if cfg.ToolRouting.MaxToolsPerContext > 0 {
+		fmt.Fprintf(os.Stderr, "Max tools per context: %d\n", cfg.ToolRouting.MaxToolsPerContext)
+	}
 
 	// Determine transport: team mode implies HTTP unless explicitly overridden.
 	useHTTP := transport == "http" || mode == "team"

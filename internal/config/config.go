@@ -69,6 +69,11 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	if cfg.Version == 0 {
+		// Empty or minimal YAML — apply defaults.
+		return DefaultConfig(), nil
+	}
+
 	if cfg.Version != CurrentSchemaVersion {
 		return nil, fmt.Errorf("unsupported config version %d (expected %d)", cfg.Version, CurrentSchemaVersion)
 	}

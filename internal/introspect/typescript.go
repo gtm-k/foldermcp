@@ -1,6 +1,7 @@
 package introspect
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -332,7 +333,7 @@ func writeScriptToTemp(script string) (string, error) {
 
 // ExtractTools runs the Node.js regex-based parser on the given file and
 // returns the discovered tool metadata.
-func (ts *TypeScriptIntrospector) ExtractTools(filePath string) ([]ToolMetadata, error) {
+func (ts *TypeScriptIntrospector) ExtractTools(ctx context.Context, filePath string) ([]ToolMetadata, error) {
 	nodeBin, err := exec.LookPath("node")
 	if err != nil {
 		return nil, fmt.Errorf("node not found in PATH: %w", err)
@@ -349,7 +350,7 @@ func (ts *TypeScriptIntrospector) ExtractTools(filePath string) ([]ToolMetadata,
 	}
 	defer os.Remove(scriptPath)
 
-	cmd := exec.Command(nodeBin, scriptPath, absPath)
+	cmd := exec.CommandContext(ctx, nodeBin, scriptPath, absPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("node extract tools failed: %w\noutput: %s", err, string(out))
@@ -376,7 +377,7 @@ func (ts *TypeScriptIntrospector) ExtractTools(filePath string) ([]ToolMetadata,
 
 // InferDependencies runs the Node.js import-extraction script and filters
 // out Node.js built-in modules, returning only third-party dependencies.
-func (ts *TypeScriptIntrospector) InferDependencies(filePath string) ([]Dependency, error) {
+func (ts *TypeScriptIntrospector) InferDependencies(ctx context.Context, filePath string) ([]Dependency, error) {
 	nodeBin, err := exec.LookPath("node")
 	if err != nil {
 		return nil, fmt.Errorf("node not found in PATH: %w", err)
@@ -393,7 +394,7 @@ func (ts *TypeScriptIntrospector) InferDependencies(filePath string) ([]Dependen
 	}
 	defer os.Remove(scriptPath)
 
-	cmd := exec.Command(nodeBin, scriptPath, absPath)
+	cmd := exec.CommandContext(ctx, nodeBin, scriptPath, absPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("node extract deps failed: %w\noutput: %s", err, string(out))

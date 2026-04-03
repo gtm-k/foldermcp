@@ -32,6 +32,19 @@ func runReview(cmd *cobra.Command, args []string) error {
 	disableList, _ := cmd.Flags().GetStringSlice("disable")
 	mode, _ := cmd.Flags().GetString("mode")
 
+	// Check for conflicts between --approve and --disable.
+	if len(approveList) > 0 && len(disableList) > 0 {
+		approveSet := make(map[string]bool)
+		for _, name := range approveList {
+			approveSet[name] = true
+		}
+		for _, name := range disableList {
+			if approveSet[name] {
+				return fmt.Errorf("tool %q appears in both --approve and --disable", name)
+			}
+		}
+	}
+
 	dir, err := filepath.Abs(".")
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -119,7 +132,24 @@ func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []s
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "%d tools found. Approve all? [y/N] ", len(pending))
+	// Count read-only vs side-effect tools.
+	readOnly := 0
+	sideEffects := 0
+	destructive := 0
+	for _, t := range pending {
+		if t.Risk == "destructive" {
+			destructive++
+		}
+		if t.Risk == "" || t.Risk == "none" || t.Risk == "low" {
+			readOnly++
+		} else {
+			sideEffects++
+		}
+	}
+	if destructive > 0 {
+		fmt.Fprintf(os.Stderr, "WARNING: %d tool(s) are labeled 'destructive'\n", destructive)
+	}
+	fmt.Fprintf(os.Stderr, "%d tools found. %d read-only, %d with side-effects. Approve all for local dev? [y/N] ", len(pending), readOnly, sideEffects)
 	reader := bufio.NewReader(os.Stdin)
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))

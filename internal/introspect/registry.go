@@ -1,6 +1,7 @@
 package introspect
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ func (r *Registry) Register(p IntrospectorPlugin) {
 // ScanDirectory walks dir, applies include/exclude glob patterns, and routes
 // each matching file to the first plugin that can handle it. Returns the
 // aggregated tool metadata from all matched files.
-func (r *Registry) ScanDirectory(dir string, includes, excludes []string) ([]ToolMetadata, error) {
+func (r *Registry) ScanDirectory(ctx context.Context, dir string, includes, excludes []string) ([]ToolMetadata, error) {
 	includeGlobs, err := compileGlobs(includes)
 	if err != nil {
 		return nil, fmt.Errorf("compile include globs: %w", err)
@@ -78,7 +79,7 @@ func (r *Registry) ScanDirectory(dir string, includes, excludes []string) ([]Too
 		// Route to the first matching plugin.
 		for _, plugin := range r.plugins {
 			if plugin.CanHandle(path) {
-				tools, extractErr := plugin.ExtractTools(path)
+				tools, extractErr := plugin.ExtractTools(ctx, path)
 				if extractErr != nil {
 					logWarning("extract tools from %s: %v", path, extractErr)
 					break
@@ -92,6 +93,15 @@ func (r *Registry) ScanDirectory(dir string, includes, excludes []string) ([]Too
 
 	if walkErr != nil {
 		return nil, fmt.Errorf("walk directory %s: %w", dir, walkErr)
+	}
+
+	// Warn about duplicate tool names.
+	seen := make(map[string]string) // name -> source file
+	for _, t := range allTools {
+		if prevFile, exists := seen[t.Name]; exists {
+			logWarning("duplicate tool name %q: %s overwrites %s", t.Name, t.SourceFile, prevFile)
+		}
+		seen[t.Name] = t.SourceFile
 	}
 
 	return allTools, nil
