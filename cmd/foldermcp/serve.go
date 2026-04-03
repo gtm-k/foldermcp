@@ -13,6 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const defaultHTTPPort = 3000
+
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the MCP server on stdin/stdout",
@@ -24,11 +26,15 @@ are served.`,
 
 func init() {
 	serveCmd.Flags().String("mode", "dev", "server mode: dev, team, production")
+	serveCmd.Flags().Int("port", defaultHTTPPort, "HTTP listen port (used in team/production mode)")
+	serveCmd.Flags().String("transport", "stdio", "transport protocol: stdio or http")
 	rootCmd.AddCommand(serveCmd)
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
 	mode, _ := cmd.Flags().GetString("mode")
+	port, _ := cmd.Flags().GetInt("port")
+	transport, _ := cmd.Flags().GetString("transport")
 
 	dir, err := filepath.Abs(".")
 	if err != nil {
@@ -94,5 +100,67 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Print status to stderr (stdout is reserved for MCP protocol).
 	fmt.Fprintf(os.Stderr, "FolderMCP server starting (mode=%s, tools=%d)\n", mode, enabledCount)
 
+	// Determine transport: team mode implies HTTP unless explicitly overridden.
+	useHTTP := transport == "http" || mode == "team"
+
+	if useHTTP {
+		return serveHTTP(mcpServer, stateDir, port)
+	}
+
 	return mcpServer.ServeStdio()
+}
+
+// serveHTTP starts the MCP server over Streamable HTTP with API key auth and
+// self-signed TLS. The API key is persisted to .foldermcp/api.key so it
+// survives restarts.
+func serveHTTP(mcpServer *server.MCPServer, stateDir string, port int) error {
+	// Ensure state directory exists.
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+
+	// Load or generate API key.
+	apiKeyPath := filepath.Join(stateDir, "api.key")
+	apiKey, err := loadOrGenerateAPIKey(apiKeyPath)
+	if err != nil {
+		return fmt.Errorf("api key: %w", err)
+	}
+
+	// Generate self-signed TLS certificate.
+	certFile, keyFile, err := server.GenerateSelfSignedCert(stateDir)
+	if err != nil {
+		return fmt.Errorf("generate TLS cert: %w", err)
+	}
+
+	addr := fmt.Sprintf(":%d", port)
+
+	fmt.Fprintf(os.Stderr, "\n--- FolderMCP Team Server ---\n")
+	fmt.Fprintf(os.Stderr, "URL:     https://localhost%s/mcp\n", addr)
+	fmt.Fprintf(os.Stderr, "API Key: %s\n", apiKey)
+	fmt.Fprintf(os.Stderr, "TLS:     self-signed (cert=%s)\n", certFile)
+	fmt.Fprintf(os.Stderr, "-----------------------------\n\n")
+
+	return mcpServer.ServeHTTP(addr, &server.HTTPConfig{
+		APIKey:   apiKey,
+		CertFile: certFile,
+		KeyFile:  keyFile,
+	})
+}
+
+// loadOrGenerateAPIKey reads an API key from path, or generates a new one
+// and writes it to the file.
+func loadOrGenerateAPIKey(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		key := string(data)
+		if len(key) > 0 {
+			return key, nil
+		}
+	}
+
+	key := server.GenerateAPIKey()
+	if err := os.WriteFile(path, []byte(key), 0600); err != nil {
+		return "", fmt.Errorf("write api key: %w", err)
+	}
+	return key, nil
 }
