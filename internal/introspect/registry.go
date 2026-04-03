@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gobwas/glob"
 )
@@ -88,6 +89,8 @@ func (r *Registry) ScanDirectory(dir string, includes, excludes []string) ([]Too
 }
 
 // compileGlobs compiles a slice of glob pattern strings into compiled matchers.
+// For patterns starting with "**/" it also compiles the suffix so that
+// root-level files are matched (e.g. "**/*.py" also matches "foo.py").
 func compileGlobs(patterns []string) ([]glob.Glob, error) {
 	compiled := make([]glob.Glob, 0, len(patterns))
 	for _, p := range patterns {
@@ -96,6 +99,17 @@ func compileGlobs(patterns []string) ([]glob.Glob, error) {
 			return nil, fmt.Errorf("invalid glob pattern %q: %w", p, err)
 		}
 		compiled = append(compiled, g)
+
+		// "**/" should match zero or more directories, so also match the
+		// suffix for root-level files.
+		if strings.HasPrefix(p, "**/") {
+			suffix := strings.TrimPrefix(p, "**/")
+			sg, err := glob.Compile(suffix, '/')
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q (suffix): %w", suffix, err)
+			}
+			compiled = append(compiled, sg)
+		}
 	}
 	return compiled, nil
 }
