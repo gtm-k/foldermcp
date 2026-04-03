@@ -25,6 +25,8 @@ func NewRegistry() *Registry {
 	r := &Registry{}
 	r.Register(&PythonIntrospector{})
 	r.Register(&OpenAPIIntrospector{})
+	r.Register(&TypeScriptIntrospector{})
+	r.Register(&ShellIntrospector{})
 	return r
 }
 
