@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FolderMCP Developer Studio</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --mono: "Cascadia Code", "Fira Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+  }
+
+  body {
+    font-family: var(--mono);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  /* --- Header / Status Bar --- */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 20px;
+    flex-wrap: wrap;
+  }
+
+  .status-bar .title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--blue);
+    white-space: nowrap;
+  }
+
+  .status-bar .stats {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+
+  .status-bar .stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+  }
+
+  .status-bar .stat .value {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  /* --- Panels --- */
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  @media (max-width: 900px) {
+    .panels { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-tertiary);
+  }
+
+  .panel-header h2 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+  }
+
+  .panel-header .refresh-indicator {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .panel-body {
+    overflow-y: auto;
+    max-height: 500px;
+  }
+
+  /* --- Tool Catalog Table --- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+  }
+
+  td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    font-size: 12px;
+  }
+
+  tr:hover td {
+    background: var(--bg-tertiary);
+  }
+
+  .tool-name {
+    font-weight: 600;
+    color: var(--blue);
+  }
+
+  .source-file {
+    color: var(--text-secondary);
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .description {
+    color: var(--text-secondary);
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* --- Badges --- */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .badge-enabled {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+  }
+
+  .badge-pending {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--yellow);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+  }
+
+  .badge-disabled {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+  }
+
+  .badge-confirmation {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--yellow);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+  }
+
+  .badge-low {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+  }
+
+  .badge-medium {
+    background: rgba(210, 153, 34, 0.15);
+    color: var(--yellow);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+  }
+
+  .badge-high {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+  }
+
+  .badge-success {
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+  }
+
+  .badge-error {
+    background: rgba(248, 81, 73, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+  }
+
+  /* --- Audit Log --- */
+  .audit-list {
+    list-style: none;
+  }
+
+  .audit-entry {
+    display: grid;
+    grid-template-columns: 160px 1fr auto;
+    gap: 12px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+    font-size: 12px;
+  }
+
+  .audit-entry:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .audit-ts {
+    color: var(--text-secondary);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .audit-detail {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .audit-tool {
+    font-weight: 600;
+    color: var(--blue);
+  }
+
+  .audit-action {
+    color: var(--text-secondary);
+  }
+
+  /* --- Empty state --- */
+  .empty-state {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--text-secondary);
+  }
+
+  /* --- Connection indicator --- */
+  .conn-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 6px;
+  }
+
+  .conn-dot.disconnected {
+    background: var(--red);
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <div class="title"><span class="conn-dot" id="connDot"></span>FolderMCP Developer Studio</div>
+    <div class="stats">
+      <div class="stat">Total: <span class="value" id="statTotal">--</span></div>
+      <div class="stat">Enabled: <span class="value" style="color:var(--green)" id="statEnabled">--</span></div>
+      <div class="stat">Pending: <span class="value" style="color:var(--yellow)" id="statPending">--</span></div>
+      <div class="stat">Disabled: <span class="value" style="color:var(--red)" id="statDisabled">--</span></div>
+      <div class="stat">Uptime: <span class="value" id="statUptime">--</span></div>
+    </div>
+  </div>
+
+  <!-- Tool Catalog -->
+  <div class="panel full-width">
+    <div class="panel-header">
+      <h2>Tool Catalog</h2>
+      <span class="refresh-indicator" id="toolRefresh">refreshing every 5s</span>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>State</th>
+            <th>Risk</th>
+            <th>Source</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody id="toolBody">
+          <tr><td colspan="5" class="empty-state">Loading tools...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Audit Log -->
+  <div class="panel full-width">
+    <div class="panel-header">
+      <h2>Audit Log</h2>
+      <span class="refresh-indicator" id="auditRefresh">refreshing every 2s</span>
+    </div>
+    <div class="panel-body">
+      <ul class="audit-list" id="auditList">
+        <li class="empty-state">Loading audit log...</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  "use strict";
+
+  var connected = true;
+
+  function setConnected(ok) {
+    connected = ok;
+    var dot = document.getElementById("connDot");
+    if (ok) {
+      dot.classList.remove("disconnected");
+    } else {
+      dot.classList.add("disconnected");
+    }
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement("div");
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+  }
+
+  function stateBadgeClass(state) {
+    switch (state) {
+      case "enabled": return "badge-enabled";
+      case "pending": return "badge-pending";
+      case "disabled": return "badge-disabled";
+      case "requires_confirmation": return "badge-confirmation";
+      default: return "badge-pending";
+    }
+  }
+
+  function riskBadgeClass(risk) {
+    switch (risk) {
+      case "low": return "badge-low";
+      case "medium": return "badge-medium";
+      case "high": return "badge-high";
+      default: return "badge-medium";
+    }
+  }
+
+  function resultBadgeClass(status) {
+    if (status === "success") return "badge-success";
+    if (status === "error") return "badge-error";
+    return "badge-pending";
+  }
+
+  function formatTimestamp(ts) {
+    if (!ts) return "--";
+    try {
+      var d = new Date(ts);
+      if (isNaN(d.getTime())) return ts;
+      return d.toLocaleString();
+    } catch (e) {
+      return ts;
+    }
+  }
+
+  // --- Fetch tools ---
+  function fetchTools() {
+    fetch("/api/tools")
+      .then(function(res) { return res.json(); })
+      .then(function(tools) {
+        setConnected(true);
+        var tbody = document.getElementById("toolBody");
+        if (!tools || tools.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No tools discovered. Run foldermcp init to scan for tools.</td></tr>';
+          return;
+        }
+        var html = "";
+        for (var i = 0; i < tools.length; i++) {
+          var t = tools[i];
+          html += "<tr>";
+          html += '<td class="tool-name">' + escapeHtml(t.name) + "</td>";
+          html += '<td><span class="badge ' + stateBadgeClass(t.state) + '">' + escapeHtml(t.state) + "</span></td>";
+          html += '<td><span class="badge ' + riskBadgeClass(t.risk) + '">' + escapeHtml(t.risk || "unknown") + "</span></td>";
+          html += '<td class="source-file" title="' + escapeHtml(t.source_file) + '">' + escapeHtml(t.source_file) + "</td>";
+          html += '<td class="description" title="' + escapeHtml(t.description) + '">' + escapeHtml(t.description) + "</td>";
+          html += "</tr>";
+        }
+        tbody.innerHTML = html;
+      })
+      .catch(function() {
+        setConnected(false);
+      });
+  }
+
+  // --- Fetch audit log ---
+  function fetchAudit() {
+    fetch("/api/audit")
+      .then(function(res) { return res.json(); })
+      .then(function(entries) {
+        setConnected(true);
+        var list = document.getElementById("auditList");
+        if (!entries || entries.length === 0) {
+          list.innerHTML = '<li class="empty-state">No audit entries yet.</li>';
+          return;
+        }
+        var html = "";
+        for (var i = 0; i < entries.length; i++) {
+          var e = entries[i];
+          html += '<li class="audit-entry">';
+          html += '<span class="audit-ts">' + escapeHtml(formatTimestamp(e.timestamp)) + "</span>";
+          html += '<span class="audit-detail">';
+          html += '<span class="audit-tool">' + escapeHtml(e.tool_name) + "</span>";
+          html += '<span class="audit-action">' + escapeHtml(e.action) + "</span>";
+          html += "</span>";
+          html += '<span class="badge ' + resultBadgeClass(e.result_status) + '">' + escapeHtml(e.result_status || "unknown") + "</span>";
+          html += "</li>";
+        }
+        list.innerHTML = html;
+      })
+      .catch(function() {
+        setConnected(false);
+      });
+  }
+
+  // --- Fetch status ---
+  function fetchStatus() {
+    fetch("/api/status")
+      .then(function(res) { return res.json(); })
+      .then(function(s) {
+        setConnected(true);
+        document.getElementById("statTotal").textContent = s.total_tools || 0;
+        document.getElementById("statEnabled").textContent = (s.state_counts && s.state_counts.enabled) || 0;
+        document.getElementById("statPending").textContent = (s.state_counts && s.state_counts.pending) || 0;
+        document.getElementById("statDisabled").textContent = (s.state_counts && s.state_counts.disabled) || 0;
+        document.getElementById("statUptime").textContent = s.uptime || "--";
+      })
+      .catch(function() {
+        setConnected(false);
+      });
+  }
+
+  // Initial load.
+  fetchTools();
+  fetchAudit();
+  fetchStatus();
+
+  // Polling intervals.
+  setInterval(fetchTools, 5000);
+  setInterval(fetchAudit, 2000);
+  setInterval(fetchStatus, 5000);
+})();
+</script>
+
+</body>
+</html>
