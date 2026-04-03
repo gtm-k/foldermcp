@@ -6,12 +6,12 @@ func DefaultConfig() *Config {
 		Version: CurrentSchemaVersion,
 		Scan: ScanConfig{
 			Include: []string{
-				"*.py",
-				"*.ts",
-				"*.js",
-				"*.yaml",
-				"*.yml",
-				"*.sh",
+				"**/*.py",
+				"**/*.ts",
+				"**/*.js",
+				"**/*.yaml",
+				"**/*.yml",
+				"**/*.sh",
 			},
 			Exclude: []string{
 				"tests/**",

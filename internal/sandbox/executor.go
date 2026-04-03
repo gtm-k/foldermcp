@@ -127,25 +127,31 @@ func (e *Executor) RunPython(ctx context.Context, code string, venvPath string, 
 	}, nil
 }
 
+// pythonFileScript is a static Python script that reads file path, function
+// name, and arguments from environment variables. This avoids string
+// interpolation of untrusted data into the script body.
+const pythonFileScript = `import importlib.util, json, sys, os
+spec = importlib.util.spec_from_file_location("_tool_module", os.environ["_FOLDERMCP_FILE"])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+fn = getattr(mod, os.environ["_FOLDERMCP_FUNC"])
+args = json.loads(os.environ.get("_FOLDERMCP_ARGS", "{}"))
+result = fn(**args)
+print("null" if result is None else json.dumps(result))
+`
+
 // RunPythonFile loads a Python file, calls a specific function with JSON args,
 // and returns the JSON-encoded result.
 func (e *Executor) RunPythonFile(ctx context.Context, filePath, funcName, argsJSON, venvPath string, env map[string]string) (*ExecutionResult, error) {
-	// Build a wrapper script that imports the file, calls the function, and
-	// prints the result as JSON.
-	script := fmt.Sprintf(`import importlib.util, json, sys
-spec = importlib.util.spec_from_file_location("_tool_module", %q)
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-fn = getattr(mod, %q)
-args = json.loads(%q)
-result = fn(**args)
-if result is None:
-    print("null")
-else:
-    print(json.dumps(result))
-`, filePath, funcName, argsJSON)
+	// Pass untrusted data via environment variables, not string interpolation.
+	if env == nil {
+		env = make(map[string]string)
+	}
+	env["_FOLDERMCP_FILE"] = filePath
+	env["_FOLDERMCP_FUNC"] = funcName
+	env["_FOLDERMCP_ARGS"] = argsJSON
 
-	return e.RunPython(ctx, script, venvPath, env)
+	return e.RunPython(ctx, pythonFileScript, venvPath, env)
 }
 
 // truncateBytes converts bytes to string, truncating if over limit.

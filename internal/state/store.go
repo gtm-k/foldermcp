@@ -68,7 +68,7 @@ func (s *Store) migrate() error {
 		input_schema TEXT NOT NULL DEFAULT '',
 		risk         TEXT NOT NULL DEFAULT '',
 		state        TEXT NOT NULL DEFAULT 'pending',
-		dep_state    TEXT NOT NULL DEFAULT 'resolving',
+		dep_state    TEXT NOT NULL DEFAULT 'resolved',
 		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -93,8 +93,8 @@ func (s *Store) migrate() error {
 // are preserved so that operator overrides are not lost on re-scan.
 func (s *Store) UpsertTool(t Tool) error {
 	const query = `
-	INSERT INTO tools (name, source_file, description, input_schema, risk)
-	VALUES (?, ?, ?, ?, ?)
+	INSERT INTO tools (name, source_file, description, input_schema, risk, state, dep_state)
+	VALUES (?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(name) DO UPDATE SET
 		source_file  = excluded.source_file,
 		description  = excluded.description,
@@ -102,7 +102,15 @@ func (s *Store) UpsertTool(t Tool) error {
 		risk         = excluded.risk,
 		updated_at   = CURRENT_TIMESTAMP
 	`
-	_, err := s.db.Exec(query, t.Name, t.SourceFile, t.Description, t.InputSchema, t.Risk)
+	toolState := t.State
+	if toolState == "" {
+		toolState = "pending"
+	}
+	depState := t.DepState
+	if depState == "" {
+		depState = "resolved"
+	}
+	_, err := s.db.Exec(query, t.Name, t.SourceFile, t.Description, t.InputSchema, t.Risk, toolState, depState)
 	if err != nil {
 		return fmt.Errorf("upsert tool %q: %w", t.Name, err)
 	}

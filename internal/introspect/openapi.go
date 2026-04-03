@@ -28,11 +28,13 @@ func (o *OpenAPIIntrospector) ExtractTools(filePath string) ([]ToolMetadata, err
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load OpenAPI spec %s: %w", filePath, err)
+		// Not a valid OpenAPI file — return empty list so the scan continues.
+		return nil, nil
 	}
 
 	if err := doc.Validate(context.Background()); err != nil {
-		return nil, fmt.Errorf("invalid OpenAPI spec %s: %w", filePath, err)
+		// File loaded but is not a valid OpenAPI spec — return empty list.
+		return nil, nil
 	}
 
 	var tools []ToolMetadata

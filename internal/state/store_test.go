@@ -64,8 +64,8 @@ func TestStore_CreateAndGetTool(t *testing.T) {
 	if got.State != "pending" {
 		t.Errorf("State = %q, want %q", got.State, "pending")
 	}
-	if got.DepState != "resolving" {
-		t.Errorf("DepState = %q, want %q", got.DepState, "resolving")
+	if got.DepState != "resolved" {
+		t.Errorf("DepState = %q, want %q", got.DepState, "resolved")
 	}
 
 	// Upsert again with changed description — state should be preserved
@@ -194,10 +194,10 @@ func TestStore_UpdateDepState(t *testing.T) {
 		t.Fatalf("UpsertTool failed: %v", err)
 	}
 
-	// Verify initial dep_state is resolving
+	// Verify initial dep_state is resolved (default).
 	got, _ := store.GetTool("fetcher")
-	if got.DepState != "resolving" {
-		t.Errorf("initial DepState = %q, want %q", got.DepState, "resolving")
+	if got.DepState != "resolved" {
+		t.Errorf("initial DepState = %q, want %q", got.DepState, "resolved")
 	}
 
 	// Update to resolved

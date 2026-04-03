@@ -9,6 +9,12 @@ import (
 	"github.com/gobwas/glob"
 )
 
+// logWarning writes a warning message to stderr. This is used instead of
+// propagating per-file errors so that scanning continues gracefully.
+func logWarning(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, "WARNING: "+format+"\n", args...)
+}
+
 // Registry manages introspector plugins and routes files to the right parser.
 type Registry struct {
 	plugins []IntrospectorPlugin
@@ -72,7 +78,8 @@ func (r *Registry) ScanDirectory(dir string, includes, excludes []string) ([]Too
 			if plugin.CanHandle(path) {
 				tools, extractErr := plugin.ExtractTools(path)
 				if extractErr != nil {
-					return fmt.Errorf("extract tools from %s: %w", path, extractErr)
+					logWarning("extract tools from %s: %v", path, extractErr)
+					break
 				}
 				allTools = append(allTools, tools...)
 				break

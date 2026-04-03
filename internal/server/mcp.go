@@ -159,6 +159,12 @@ func (ms *MCPServer) logInvocation(toolName, params, resultStatus string) {
 	}
 }
 
+// EnabledToolCount returns the number of tools registered in the MCP server
+// (those with state "enabled" or "requires_confirmation").
+func (ms *MCPServer) EnabledToolCount() int {
+	return ms.enabledToolCount
+}
+
 // ServeStdio starts the MCP server on stdin/stdout using the stdio transport.
 func (ms *MCPServer) ServeStdio() error {
 	return server.ServeStdio(ms.server)
