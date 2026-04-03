@@ -1,0 +1,62 @@
+# FolderMCP Configuration
+# Copy this file to foldermcp.yaml and customize for your project.
+
+# Schema version (required). Must be 1.
+version: 1
+
+# Scan configuration — controls which files are discovered and indexed.
+scan:
+  # Glob patterns for files to include in scanning.
+  include:
+    - "*.py"
+    - "*.ts"
+    - "*.js"
+    - "*.yaml"
+    - "*.yml"
+    - "*.sh"
+
+  # Glob patterns for files/directories to exclude from scanning.
+  exclude:
+    - "tests/**"
+    - "__pycache__/**"
+    - "node_modules/**"
+    - ".git/**"
+    - ".foldermcp/**"
+
+# Tool definitions — declare and configure individual tools.
+# Each key is a tool name; values control state, description, and risk level.
+tools:
+  # Example tool:
+  # shell_exec:
+  #   state: "enabled"        # enabled | disabled | ask
+  #   description: "Execute shell commands in a sandboxed environment"
+  #   risk: "high"            # low | medium | high
+
+# Project dependencies by ecosystem.
+dependencies:
+  python: []
+    # - requests
+    # - flask
+  node: []
+    # - express
+    # - typescript
+
+# Tool routing — controls how tools are selected for each context window.
+tool_routing:
+  # Maximum number of tools exposed in a single context.
+  max_tools_per_context: 20
+
+  # Routing strategy: "profile" selects tools by named profile,
+  # "priority" ranks all tools and picks the top N.
+  strategy: "profile"
+
+  # Named profiles — each maps a profile name to a list of tool names.
+  profiles:
+    # Example:
+    # backend:
+    #   - shell_exec
+    #   - file_read
+    #   - file_write
+    # frontend:
+    #   - browser_preview
+    #   - file_read
