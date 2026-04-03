@@ -45,6 +45,10 @@ ehthumbs.db
 .env
 .env.local
 
+# Python
+__pycache__/
+*.pyc
+
 # Coverage
 coverage.out
 coverage.html
