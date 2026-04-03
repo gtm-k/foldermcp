@@ -7,6 +7,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version is set at build time via -ldflags.
+var version = "dev"
+
 var rootCmd = &cobra.Command{
 	Use:   "foldermcp",
 	Short: "Turn folders into secure MCP tool servers",
@@ -14,6 +17,10 @@ var rootCmd = &cobra.Command{
 then serves them as MCP (Model Context Protocol) tools. It handles discovery,
 introspection, dependency management, sandboxed execution, and protocol translation
 so that any folder of scripts becomes a plug-and-play AI tool server.`,
+}
+
+func init() {
+	rootCmd.Version = version
 }
 
 // Execute runs the root command.

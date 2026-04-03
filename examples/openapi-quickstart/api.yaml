@@ -1,0 +1,129 @@
+openapi: "3.0.3"
+info:
+  title: User Management API
+  version: "1.0.0"
+  description: A simple user management API for demonstrating FolderMCP OpenAPI introspection.
+
+servers:
+  - url: http://localhost:8080/api/v1
+
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      summary: List all users
+      description: Returns a paginated list of users.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+          description: Maximum number of users to return.
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          description: Number of users to skip.
+      responses:
+        "200":
+          description: A list of users.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      operationId: createUser
+      summary: Create a new user
+      description: Creates a user account with the given name and email.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{userId}:
+    get:
+      operationId: getUser
+      summary: Get a user by ID
+      description: Returns a single user by their unique identifier.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The unique user identifier.
+      responses:
+        "200":
+          description: The requested user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: User not found.
+    delete:
+      operationId: deleteUser
+      summary: Delete a user
+      description: Permanently removes a user account.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The unique user identifier.
+      responses:
+        "204":
+          description: User deleted successfully.
+        "404":
+          description: User not found.
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "usr_abc123"
+        name:
+          type: string
+          example: "Alice"
+        email:
+          type: string
+          format: email
+          example: "alice@example.com"
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - email
+
+    CreateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Bob"
+        email:
+          type: string
+          format: email
+          example: "bob@example.com"
+      required:
+        - name
+        - email

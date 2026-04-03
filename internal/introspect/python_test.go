@@ -173,6 +173,73 @@ func TestRegistry_ScanDirectory(t *testing.T) {
 	}
 }
 
+func TestPythonIntrospector_ToolDecorator(t *testing.T) {
+	if _, err := findPython(); err != nil {
+		t.Skip("python3/python not available:", err)
+	}
+
+	p := &PythonIntrospector{}
+	filePath := filepath.Join(testdataDir(), "python_decorator", "decorated_tools.py")
+	tools, err := p.ExtractTools(filePath)
+	if err != nil {
+		t.Fatalf("ExtractTools() error: %v", err)
+	}
+
+	// tool() decorator function itself is skipped (starts with decorator def inside),
+	// but we expect: add, remove_record (renamed), fetch_profile, plain_function = 4 tools
+	// Note: the tool() def at module level is also a function, but it won't start with _,
+	// so it gets picked up too. Let's just check the decorated ones by name.
+	toolMap := make(map[string]ToolMetadata)
+	for _, tm := range tools {
+		toolMap[tm.Name] = tm
+	}
+
+	// Check @tool(description="Add two numbers", risk="read_only")
+	add, ok := toolMap["add"]
+	if !ok {
+		t.Fatal("expected tool 'add' to be discovered")
+	}
+	if add.Description != "Add two numbers" {
+		t.Errorf("add description = %q, want %q", add.Description, "Add two numbers")
+	}
+	if add.Risk != "read_only" {
+		t.Errorf("add risk = %q, want %q", add.Risk, "read_only")
+	}
+
+	// Check @tool(name="remove_record", risk="destructive")
+	rm, ok := toolMap["remove_record"]
+	if !ok {
+		t.Fatal("expected tool 'remove_record' (renamed from delete_record)")
+	}
+	if rm.Description != "Delete a record permanently" {
+		t.Errorf("remove_record description = %q, want %q", rm.Description, "Delete a record permanently")
+	}
+	if rm.Risk != "destructive" {
+		t.Errorf("remove_record risk = %q, want %q", rm.Risk, "destructive")
+	}
+
+	// Check @tool(risk="network")
+	fp, ok := toolMap["fetch_profile"]
+	if !ok {
+		t.Fatal("expected tool 'fetch_profile' to be discovered")
+	}
+	if fp.Risk != "network" {
+		t.Errorf("fetch_profile risk = %q, want %q", fp.Risk, "network")
+	}
+
+	// Check plain function is still discovered
+	pf, ok := toolMap["plain_function"]
+	if !ok {
+		t.Fatal("expected tool 'plain_function' to be discovered")
+	}
+	if pf.Description != "A plain function without decorator should still be discovered." {
+		t.Errorf("plain_function description = %q", pf.Description)
+	}
+	if pf.Risk != "read_only" {
+		t.Errorf("plain_function risk = %q, want %q", pf.Risk, "read_only")
+	}
+}
+
 func TestRegistry_ScanDirectory_WithExclude(t *testing.T) {
 	if _, err := findPython(); err != nil {
 		t.Skip("python3/python not available:", err)

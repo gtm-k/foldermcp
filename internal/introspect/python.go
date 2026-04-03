@@ -51,7 +51,9 @@ var pythonStdlibModules = map[string]bool{
 }
 
 // extractToolsScript is the Python script that parses a file's AST and
-// returns a JSON array of tool metadata.
+// returns a JSON array of tool metadata. It detects both plain functions
+// (using docstrings) and functions decorated with @tool(...) from the
+// foldermcp_decorator module.
 const extractToolsScript = `
 import ast, json, sys
 
@@ -78,6 +80,25 @@ def get_type_name(annotation):
             return type_map.get(annotation.value.id, 'string')
     return 'string'
 
+def get_decorator_info(node):
+    """Check if the function has a @tool(...) decorator and extract its kwargs."""
+    for dec in node.decorator_list:
+        dec_name = None
+        if isinstance(dec, ast.Call):
+            if isinstance(dec.func, ast.Name) and dec.func.id == 'tool':
+                dec_name = 'tool'
+            elif isinstance(dec.func, ast.Attribute) and dec.func.attr == 'tool':
+                dec_name = 'tool'
+        elif isinstance(dec, ast.Name) and dec.id == 'tool':
+            return {}  # bare @tool with no arguments
+        if dec_name == 'tool':
+            kwargs = {}
+            for kw in dec.keywords:
+                if kw.arg and isinstance(kw.value, ast.Constant):
+                    kwargs[kw.arg] = kw.value.value
+            return kwargs
+    return None
+
 def extract_tools(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         source = f.read()
@@ -88,9 +109,28 @@ def extract_tools(filepath):
             continue
         if node.name.startswith('_'):
             continue
+
+        # Check for @tool decorator
+        dec_info = get_decorator_info(node)
+        has_tool_decorator = dec_info is not None
+        if dec_info is None:
+            dec_info = {}
+
         docstring = ast.get_docstring(node)
-        if not docstring:
-            docstring = 'Tool: ' + node.name
+
+        # Determine description: decorator kwarg > docstring > default
+        if 'description' in dec_info:
+            description = dec_info['description']
+        elif docstring:
+            description = docstring
+        else:
+            description = 'Tool: ' + node.name
+
+        # Determine risk: decorator kwarg > default
+        risk = dec_info.get('risk', 'read_only')
+
+        # Determine tool name: decorator kwarg > function name
+        tool_name = dec_info.get('name', node.name)
 
         args = node.args
         properties = {}
@@ -116,10 +156,10 @@ def extract_tools(filepath):
             schema['required'] = required
 
         tools.append({
-            'name': node.name,
-            'description': docstring,
+            'name': tool_name,
+            'description': description,
             'input_schema': json.dumps(schema),
-            'risk': 'read_only',
+            'risk': risk,
             'language': 'python',
         })
     print(json.dumps(tools))
