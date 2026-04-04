@@ -798,7 +798,7 @@ If FolderMCP succeeds and sandbox performance becomes a critical differentiator,
 
 ### 12.1 Open-Core with Buyer-Based Segmentation
 
-**Open-source core (MIT License):**
+**Open-source core (Apache License 2.0):**
 - Folder scanner and introspector (all languages)
 - Auto-dependency resolution
 - Review/approval CLI
