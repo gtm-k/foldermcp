@@ -131,7 +131,7 @@ func (s *StudioServer) handleTools(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	tools := []toolJSON{}
 	for rows.Next() {
@@ -148,7 +148,7 @@ func (s *StudioServer) handleTools(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tools)
+	_ = json.NewEncoder(w).Encode(tools)
 }
 
 func (s *StudioServer) handleAudit(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +160,7 @@ func (s *StudioServer) handleAudit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	entries := []auditJSON{}
 	for rows.Next() {
@@ -177,7 +177,7 @@ func (s *StudioServer) handleAudit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
+	_ = json.NewEncoder(w).Encode(entries)
 }
 
 func (s *StudioServer) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +188,7 @@ func (s *StudioServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	status := statusJSON{
 		StateCounts: map[string]int{},
@@ -213,5 +213,5 @@ func (s *StudioServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status.UptimeString = uptime.String()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }

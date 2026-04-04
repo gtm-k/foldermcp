@@ -41,13 +41,13 @@ func Open(stateDir string) (*Store, error) {
 
 	// Enable WAL mode for better concurrent read performance.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 
@@ -150,7 +150,7 @@ func (s *Store) ListTools() ([]Tool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tools []Tool
 	for rows.Next() {

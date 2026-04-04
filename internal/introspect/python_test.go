@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -157,9 +156,7 @@ func TestRegistry_ScanDirectory(t *testing.T) {
 	if _, err := findPython(); err != nil {
 		t.Skip("python3/python not available:", err)
 	}
-	if runtime.GOOS == "windows" {
-		// Glob patterns with ** may behave differently; test anyway
-	}
+	// Note: Glob patterns with ** may behave differently on Windows.
 
 	reg := NewRegistry()
 	dir := filepath.Join(testdataDir(), "python_simple")

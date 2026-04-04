@@ -71,7 +71,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	tools, err := store.ListTools()
 	if err != nil {

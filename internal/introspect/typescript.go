@@ -320,12 +320,12 @@ func writeScriptToTemp(script string) (string, error) {
 		return "", fmt.Errorf("create temp script: %w", err)
 	}
 	if _, err := f.WriteString(script); err != nil {
-		f.Close()
-		os.Remove(f.Name())
+		_ = f.Close()
+		_ = os.Remove(f.Name())
 		return "", fmt.Errorf("write temp script: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
+		_ = os.Remove(f.Name())
 		return "", fmt.Errorf("close temp script: %w", err)
 	}
 	return f.Name(), nil
@@ -348,7 +348,7 @@ func (ts *TypeScriptIntrospector) ExtractTools(ctx context.Context, filePath str
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(scriptPath)
+	defer func() { _ = os.Remove(scriptPath) }()
 
 	cmd := exec.CommandContext(ctx, nodeBin, scriptPath, absPath)
 	out, err := cmd.CombinedOutput()
@@ -392,7 +392,7 @@ func (ts *TypeScriptIntrospector) InferDependencies(ctx context.Context, filePat
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(scriptPath)
+	defer func() { _ = os.Remove(scriptPath) }()
 
 	cmd := exec.CommandContext(ctx, nodeBin, scriptPath, absPath)
 	out, err := cmd.CombinedOutput()

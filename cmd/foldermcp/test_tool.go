@@ -50,13 +50,13 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create audit logger.
 	logPath := filepath.Join(stateDir, "audit.log")
 	logger, err := audit.NewLogger(logPath)
 	if err == nil {
-		defer logger.Close()
+		defer func() { _ = logger.Close() }()
 	}
 
 	// Create executor.
@@ -171,7 +171,7 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 		status = "error"
 	}
 	if logger != nil {
-		logger.Log(tool.Name, "test", sanitizer.SanitizeParams(paramsStr), "", status)
+		_ = logger.Log(tool.Name, "test", sanitizer.SanitizeParams(paramsStr), "", status)
 	}
 
 	if result.ExitCode != 0 {

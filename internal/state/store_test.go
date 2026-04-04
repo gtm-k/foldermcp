@@ -11,13 +11,13 @@ func setupTestStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	store, err := Open(dir)
 	if err != nil {
 		t.Fatalf("Open(%q) failed: %v", dir, err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 
 	return store
 }
@@ -251,14 +251,14 @@ func TestStore_OpenCreatesDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	stateDir := dir + "/subdir"
 	store, err := Open(stateDir)
 	if err != nil {
 		t.Fatalf("Open(%q) failed: %v", stateDir, err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// The .foldermcp directory should have been created
 	info, err := os.Stat(stateDir)

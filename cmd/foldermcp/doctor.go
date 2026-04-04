@@ -48,24 +48,24 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if pythonOk {
-		fmt.Fprintf(os.Stdout, "  ok   Python found (%s)\n", pythonName)
+		_, _ = fmt.Fprintf(os.Stdout, "  ok   Python found (%s)\n", pythonName)
 	} else {
-		fmt.Fprintln(os.Stdout, "  FAIL Python not found")
-		fmt.Fprintln(os.Stdout, "       Fix: Install Python 3.10+ from https://python.org")
+		_, _ = fmt.Fprintln(os.Stdout, "  FAIL Python not found")
+		_, _ = fmt.Fprintln(os.Stdout, "       Fix: Install Python 3.10+ from https://python.org")
 		issues++
 	}
 
 	// Check 2: uv available.
 	if _, err := exec.LookPath("uv"); err == nil {
-		fmt.Fprintln(os.Stdout, "  ok   uv found")
+		_, _ = fmt.Fprintln(os.Stdout, "  ok   uv found")
 	} else {
-		fmt.Fprintln(os.Stdout, "  WARN uv not found")
+		_, _ = fmt.Fprintln(os.Stdout, "  WARN uv not found")
 		if doctorFixFlag {
-			fmt.Fprintln(os.Stdout, "       --fix: Install uv with one of:")
-			fmt.Fprintln(os.Stdout, "         pip install uv")
-			fmt.Fprintln(os.Stdout, "         curl -LsSf https://astral.sh/uv/install.sh | sh")
+			_, _ = fmt.Fprintln(os.Stdout, "       --fix: Install uv with one of:")
+			_, _ = fmt.Fprintln(os.Stdout, "         pip install uv")
+			_, _ = fmt.Fprintln(os.Stdout, "         curl -LsSf https://astral.sh/uv/install.sh | sh")
 		} else {
-			fmt.Fprintln(os.Stdout, "       Fix: Install uv — https://docs.astral.sh/uv/getting-started/installation/")
+			_, _ = fmt.Fprintln(os.Stdout, "       Fix: Install uv — https://docs.astral.sh/uv/getting-started/installation/")
 		}
 		issues++
 	}
@@ -77,19 +77,19 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 	configPath := filepath.Join(dir, "foldermcp.yaml")
 	if _, err := os.Stat(configPath); err == nil {
-		fmt.Fprintln(os.Stdout, "  ok   foldermcp.yaml exists")
+		_, _ = fmt.Fprintln(os.Stdout, "  ok   foldermcp.yaml exists")
 	} else {
-		fmt.Fprintln(os.Stdout, "  FAIL foldermcp.yaml not found")
+		_, _ = fmt.Fprintln(os.Stdout, "  FAIL foldermcp.yaml not found")
 		if doctorFixFlag {
 			cfg := config.DefaultConfig()
 			if saveErr := config.Save(dir, cfg); saveErr != nil {
-				fmt.Fprintf(os.Stdout, "       --fix: Failed to create config: %v\n", saveErr)
+				_, _ = fmt.Fprintf(os.Stdout, "       --fix: Failed to create config: %v\n", saveErr)
 			} else {
-				fmt.Fprintln(os.Stdout, "       --fix: Created foldermcp.yaml with defaults")
+				_, _ = fmt.Fprintln(os.Stdout, "       --fix: Created foldermcp.yaml with defaults")
 				fixed++
 			}
 		} else {
-			fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp init' to create it")
+			_, _ = fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp init' to create it")
 		}
 		issues++
 	}
@@ -99,7 +99,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	store, storeErr := state.Open(stateDir)
 	if storeErr == nil {
 		tools, listErr := store.ListTools()
-		store.Close()
+		_ = store.Close()
 		if listErr == nil {
 			enabledCount := 0
 			for _, t := range tools {
@@ -108,27 +108,27 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 				}
 			}
 			if enabledCount > 0 {
-				fmt.Fprintf(os.Stdout, "  ok   State store accessible (%d enabled tools)\n", enabledCount)
+				_, _ = fmt.Fprintf(os.Stdout, "  ok   State store accessible (%d enabled tools)\n", enabledCount)
 			} else if len(tools) > 0 {
-				fmt.Fprintf(os.Stdout, "  WARN State store accessible (%d tools, none enabled)\n", len(tools))
+				_, _ = fmt.Fprintf(os.Stdout, "  WARN State store accessible (%d tools, none enabled)\n", len(tools))
 				if doctorFixFlag {
-					fmt.Fprintln(os.Stdout, "       --fix: Run 'foldermcp review' to approve tools")
+					_, _ = fmt.Fprintln(os.Stdout, "       --fix: Run 'foldermcp review' to approve tools")
 				} else {
-					fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp review' to approve tools")
+					_, _ = fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp review' to approve tools")
 				}
 				issues++
 			} else {
-				fmt.Fprintln(os.Stdout, "  WARN State store empty")
-				fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp init' to scan for tools")
+				_, _ = fmt.Fprintln(os.Stdout, "  WARN State store empty")
+				_, _ = fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp init' to scan for tools")
 				issues++
 			}
 		} else {
-			fmt.Fprintln(os.Stdout, "  FAIL State store error")
+			_, _ = fmt.Fprintln(os.Stdout, "  FAIL State store error")
 			issues++
 		}
 	} else {
-		fmt.Fprintln(os.Stdout, "  WARN State store not initialized")
-		fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp init'")
+		_, _ = fmt.Fprintln(os.Stdout, "  WARN State store not initialized")
+		_, _ = fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp init'")
 		issues++
 	}
 
@@ -136,33 +136,33 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	claudeConfigPath := claudeDesktopConfigPath()
 	if claudeConfigPath != "" {
 		if _, err := os.Stat(claudeConfigPath); err == nil {
-			fmt.Fprintln(os.Stdout, "  ok   Claude Desktop config found")
+			_, _ = fmt.Fprintln(os.Stdout, "  ok   Claude Desktop config found")
 		} else {
-			fmt.Fprintln(os.Stdout, "  WARN Claude Desktop config not found")
+			_, _ = fmt.Fprintln(os.Stdout, "  WARN Claude Desktop config not found")
 			if doctorFixFlag {
 				if connectErr := connectClaudeDesktop(); connectErr != nil {
-					fmt.Fprintf(os.Stdout, "       --fix: Failed to configure Claude Desktop: %v\n", connectErr)
+					_, _ = fmt.Fprintf(os.Stdout, "       --fix: Failed to configure Claude Desktop: %v\n", connectErr)
 				} else {
-					fmt.Fprintln(os.Stdout, "       --fix: Configured Claude Desktop")
+					_, _ = fmt.Fprintln(os.Stdout, "       --fix: Configured Claude Desktop")
 					fixed++
 				}
 			} else {
-				fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp connect claude-desktop'")
+				_, _ = fmt.Fprintln(os.Stdout, "       Fix: Run 'foldermcp connect claude-desktop'")
 			}
 			issues++
 		}
 	} else {
-		fmt.Fprintln(os.Stdout, "  WARN Claude Desktop config path unknown for this platform")
+		_, _ = fmt.Fprintln(os.Stdout, "  WARN Claude Desktop config path unknown for this platform")
 		issues++
 	}
 
-	fmt.Fprintln(os.Stdout, "")
+	_, _ = fmt.Fprintln(os.Stdout, "")
 	if issues == 0 {
-		fmt.Fprintln(os.Stdout, "All checks passed.")
+		_, _ = fmt.Fprintln(os.Stdout, "All checks passed.")
 	} else if doctorFixFlag && fixed > 0 {
-		fmt.Fprintf(os.Stdout, "%d issue(s) found, %d fixed automatically.\n", issues, fixed)
+		_, _ = fmt.Fprintf(os.Stdout, "%d issue(s) found, %d fixed automatically.\n", issues, fixed)
 	} else {
-		fmt.Fprintf(os.Stdout, "%d issue(s) found.\n", issues)
+		_, _ = fmt.Fprintf(os.Stdout, "%d issue(s) found.\n", issues)
 	}
 
 	return nil

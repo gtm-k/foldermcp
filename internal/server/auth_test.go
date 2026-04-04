@@ -85,7 +85,7 @@ func TestGenerateAPIKey(t *testing.T) {
 
 	// Hex chars only after prefix.
 	for i, c := range key[7:] {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("key[%d] = %c, want hex char", i+7, c)
 		}
 	}

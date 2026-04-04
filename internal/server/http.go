@@ -48,14 +48,14 @@ func (ms *MCPServer) ServeHTTP(addr string, cfg *HTTPConfig) error {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	// Readiness endpoint — reports the number of enabled tools.
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ready","tools":%d}`, ms.enabledToolCount)
+		_, _ = fmt.Fprintf(w, `{"status":"ready","tools":%d}`, ms.enabledToolCount)
 	})
 
 	// Prometheus metrics stub endpoint.
@@ -63,12 +63,12 @@ func (ms *MCPServer) ServeHTTP(addr string, cfg *HTTPConfig) error {
 	enabledTools := ms.enabledToolCount
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintf(w, "# HELP foldermcp_tools_total Total number of tools\n")
-		fmt.Fprintf(w, "# TYPE foldermcp_tools_total gauge\n")
-		fmt.Fprintf(w, "foldermcp_tools_total %d\n", totalTools)
-		fmt.Fprintf(w, "# HELP foldermcp_tools_enabled Number of enabled tools\n")
-		fmt.Fprintf(w, "# TYPE foldermcp_tools_enabled gauge\n")
-		fmt.Fprintf(w, "foldermcp_tools_enabled %d\n", enabledTools)
+		_, _ = fmt.Fprintf(w, "# HELP foldermcp_tools_total Total number of tools\n")
+		_, _ = fmt.Fprintf(w, "# TYPE foldermcp_tools_total gauge\n")
+		_, _ = fmt.Fprintf(w, "foldermcp_tools_total %d\n", totalTools)
+		_, _ = fmt.Fprintf(w, "# HELP foldermcp_tools_enabled Number of enabled tools\n")
+		_, _ = fmt.Fprintf(w, "# TYPE foldermcp_tools_enabled gauge\n")
+		_, _ = fmt.Fprintf(w, "foldermcp_tools_enabled %d\n", enabledTools)
 	})
 
 	customHTTP := &http.Server{

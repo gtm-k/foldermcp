@@ -58,7 +58,7 @@ func exportA2A(cmd *cobra.Command) error {
 
 	store, err := state.Open(stateDir)
 	if err == nil {
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		tools, err = store.ListTools()
 		if err != nil {
 			return fmt.Errorf("list tools: %w", err)

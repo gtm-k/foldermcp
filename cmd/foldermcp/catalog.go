@@ -32,7 +32,7 @@ func runCatalog(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	tools, err := store.ListTools()
 	if err != nil {
@@ -45,10 +45,14 @@ func runCatalog(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATE\tRISK\tSOURCE\tDESCRIPTION")
+	if _, err := fmt.Fprintln(w, "NAME\tSTATE\tRISK\tSOURCE\tDESCRIPTION"); err != nil {
+		return fmt.Errorf("write header: %w", err)
+	}
 	for _, t := range tools {
 		desc := truncateString(t.Description, 50)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.Name, t.State, t.Risk, t.SourceFile, desc)
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.Name, t.State, t.Risk, t.SourceFile, desc); err != nil {
+			return fmt.Errorf("write tool row: %w", err)
+		}
 	}
 	return w.Flush()
 }

@@ -177,7 +177,7 @@ func parseRequirementsTxt(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Matches the package name at the start of a requirement line.
 	// Package names consist of letters, digits, hyphens, underscores, and dots.

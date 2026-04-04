@@ -61,7 +61,7 @@ func runUI(cmd *cobra.Command, args []string) error {
 	select {
 	case <-ctx.Done():
 		fmt.Fprintln(os.Stderr, "\nShutting down studio...")
-		srv.Close()
+		_ = srv.Close()
 		return nil
 	case err := <-errCh:
 		return err

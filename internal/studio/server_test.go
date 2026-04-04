@@ -47,11 +47,11 @@ func setupTestServer(t *testing.T) (*StudioServer, func()) {
 		t.Fatalf("log audit: %v", err)
 	}
 
-	store.Close()
+	_ = store.Close()
 
 	srv := NewStudioServer(stateDir, 0)
 	cleanup := func() {
-		srv.Close()
+		_ = srv.Close()
 	}
 	return srv, cleanup
 }

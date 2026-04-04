@@ -24,7 +24,7 @@ func (o *OpenAPIIntrospector) CanHandle(filePath string) bool {
 	if strings.HasSuffix(lower, "package.json") || strings.HasSuffix(lower, "tsconfig.json") || strings.HasSuffix(lower, "docker-compose.yml") || strings.HasSuffix(lower, "docker-compose.yaml") {
 		return false
 	}
-	if !(strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".json")) {
+	if !strings.HasSuffix(lower, ".yaml") && !strings.HasSuffix(lower, ".yml") && !strings.HasSuffix(lower, ".json") {
 		return false
 	}
 	// Quick content sniff: check first 512 bytes for openapi/swagger key.
@@ -174,9 +174,7 @@ func buildInputSchema(op *openapi3.Operation, method string) map[string]interfac
 			}
 
 			// Add required fields from the request body
-			for _, req := range bodySchema.Required {
-				required = append(required, req)
-			}
+			required = append(required, bodySchema.Required...)
 		}
 	}
 

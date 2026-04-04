@@ -16,7 +16,7 @@ func TestLogger_WritesJSONLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLogger: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	if err := logger.Log("my_tool", "invoke", `{"x":1}`, "test-caller", "success"); err != nil {
 		t.Fatalf("Log: %v", err)
@@ -61,7 +61,7 @@ func TestLogger_MultipleEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLogger: %v", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	if err := logger.Log("tool_a", "invoke", "", "", "success"); err != nil {
 		t.Fatalf("Log tool_a: %v", err)

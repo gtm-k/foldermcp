@@ -84,10 +84,10 @@ func (l *Logger) rotateLocked() error {
 	if err != nil || info.Size() < maxLogSize {
 		return nil
 	}
-	l.file.Close()
+	_ = l.file.Close()
 	backupPath := l.path + ".1"
-	os.Remove(backupPath)
-	os.Rename(l.path, backupPath)
+	_ = os.Remove(backupPath)
+	_ = os.Rename(l.path, backupPath)
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		l.file = nil

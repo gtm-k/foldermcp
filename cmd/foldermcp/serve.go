@@ -56,7 +56,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	tools, err := store.ListTools()
 	if err != nil {
@@ -89,7 +89,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create audit logger: %w", err)
 	}
-	defer logger.Close()
+	defer func() { _ = logger.Close() }()
 
 	// Create MCP server.
 	mcpServer, err := server.NewMCPServer("foldermcp", "0.1.0", tools, store, &server.MCPServerConfig{
@@ -121,7 +121,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go func() {
 		<-sigCh
 		fmt.Fprintf(os.Stderr, "\nShutting down gracefully...\n")
-		os.Stdin.Close()
+		_ = os.Stdin.Close()
 	}()
 
 	return mcpServer.ServeStdio()

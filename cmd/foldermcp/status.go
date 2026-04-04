@@ -31,7 +31,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	tools, err := store.ListTools()
 	if err != nil {
@@ -51,16 +51,16 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		depStateCounts[t.DepState]++
 	}
 
-	fmt.Fprintf(os.Stdout, "FolderMCP Status (%d tools)\n", len(tools))
-	fmt.Fprintln(os.Stdout, "")
-	fmt.Fprintln(os.Stdout, "Tool States:")
+	_, _ = fmt.Fprintf(os.Stdout, "FolderMCP Status (%d tools)\n", len(tools))
+	_, _ = fmt.Fprintln(os.Stdout, "")
+	_, _ = fmt.Fprintln(os.Stdout, "Tool States:")
 	printCount(stateCounts, "enabled")
 	printCount(stateCounts, "pending")
 	printCount(stateCounts, "disabled")
 	printCount(stateCounts, "requires_confirmation")
 
-	fmt.Fprintln(os.Stdout, "")
-	fmt.Fprintln(os.Stdout, "Dependency States:")
+	_, _ = fmt.Fprintln(os.Stdout, "")
+	_, _ = fmt.Fprintln(os.Stdout, "Dependency States:")
 	printCount(depStateCounts, "resolved")
 	printCount(depStateCounts, "resolving")
 	printCount(depStateCounts, "failed")
@@ -71,6 +71,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 func printCount(counts map[string]int, key string) {
 	count := counts[key]
 	if count > 0 {
-		fmt.Fprintf(os.Stdout, "  %-24s %d\n", key, count)
+		_, _ = fmt.Fprintf(os.Stdout, "  %-24s %d\n", key, count)
 	}
 }
