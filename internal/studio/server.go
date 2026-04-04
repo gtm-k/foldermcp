@@ -98,7 +98,7 @@ func (s *StudioServer) Start() error {
 		return err
 	}
 
-	addr := fmt.Sprintf(":%d", s.port)
+	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
 	return http.ListenAndServe(addr, handler)
 }
 

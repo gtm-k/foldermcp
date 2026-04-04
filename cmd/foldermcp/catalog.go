@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	catalogState string
+	catalogRisk  string
+	catalogType  string
+)
+
 var catalogCmd = &cobra.Command{
 	Use:   "catalog",
 	Short: "List all discovered tools in a table",
@@ -19,6 +26,9 @@ var catalogCmd = &cobra.Command{
 }
 
 func init() {
+	catalogCmd.Flags().StringVar(&catalogState, "state", "", "Filter by state (enabled, pending, disabled)")
+	catalogCmd.Flags().StringVar(&catalogRisk, "risk", "", "Filter by risk (read_only, side_effects, destructive)")
+	catalogCmd.Flags().StringVar(&catalogType, "type", "", "Filter by type (tool, resource)")
 	rootCmd.AddCommand(catalogCmd)
 }
 
@@ -39,18 +49,90 @@ func runCatalog(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	tools, err := store.ListTools()
+	allTools, err := store.ListTools()
 	if err != nil {
 		return fmt.Errorf("list tools: %w", err)
 	}
 
-	resources, err := store.ListResources()
+	allResources, err := store.ListResources()
 	if err != nil {
 		return fmt.Errorf("list resources: %w", err)
 	}
 
+	// Apply filters.
+	var tools []state.Tool
+	for _, t := range allTools {
+		if catalogType != "" && catalogType != "tool" {
+			continue
+		}
+		if catalogState != "" && t.State != catalogState {
+			continue
+		}
+		if catalogRisk != "" && t.Risk != catalogRisk {
+			continue
+		}
+		tools = append(tools, t)
+	}
+	var resources []state.Resource
+	for _, r := range allResources {
+		if catalogType != "" && catalogType != "resource" {
+			continue
+		}
+		if catalogState != "" && r.State != catalogState {
+			continue
+		}
+		// Resources don't have a risk field; skip if risk filter is set.
+		if catalogRisk != "" {
+			continue
+		}
+		resources = append(resources, r)
+	}
+
 	if len(tools) == 0 && len(resources) == 0 {
+		if jsonOutput {
+			fmt.Println("[]")
+			return nil
+		}
 		fmt.Fprintln(os.Stderr, "No tools or resources found. Run 'foldermcp init' first.")
+		return nil
+	}
+
+	if jsonOutput {
+		type catalogEntry struct {
+			Name        string `json:"name"`
+			Type        string `json:"type"`
+			State       string `json:"state"`
+			Risk        string `json:"risk,omitempty"`
+			MimeType    string `json:"mime_type,omitempty"`
+			SourceFile  string `json:"source_file,omitempty"`
+			Description string `json:"description,omitempty"`
+			SizeBytes   int64  `json:"size_bytes,omitempty"`
+		}
+		var entries []catalogEntry
+		for _, t := range tools {
+			entries = append(entries, catalogEntry{
+				Name:        t.Name,
+				Type:        "tool",
+				State:       t.State,
+				Risk:        t.Risk,
+				SourceFile:  t.SourceFile,
+				Description: t.Description,
+			})
+		}
+		for _, r := range resources {
+			entries = append(entries, catalogEntry{
+				Name:      r.Name,
+				Type:      "resource",
+				State:     r.State,
+				MimeType:  r.MimeType,
+				SizeBytes: r.SizeBytes,
+			})
+		}
+		data, err := json.MarshalIndent(entries, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal catalog: %w", err)
+		}
+		fmt.Println(string(data))
 		return nil
 	}
 

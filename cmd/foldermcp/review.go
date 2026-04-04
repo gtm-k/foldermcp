@@ -21,13 +21,17 @@ is reviewed individually. Use --approve and --disable flags for batch mode.`,
 	RunE: runReview,
 }
 
-var reviewApproveAll bool
+var (
+	reviewApproveAll bool
+	reviewDryRun     bool
+)
 
 func init() {
 	reviewCmd.Flags().StringSlice("approve", nil, "tool names to approve (batch mode)")
 	reviewCmd.Flags().StringSlice("disable", nil, "tool names to disable (batch mode)")
 	reviewCmd.Flags().StringSlice("confirm", nil, "tool names to set as requires_confirmation (batch mode)")
 	reviewCmd.Flags().BoolVar(&reviewApproveAll, "approve-all", false, "Approve all pending tools")
+	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "Preview changes without applying")
 	reviewCmd.Flags().String("mode", "dev", "review mode: dev, team, production")
 	rootCmd.AddCommand(reviewCmd)
 }
@@ -130,6 +134,18 @@ func runReview(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "WARNING: %d tool(s) labeled 'destructive' will be approved\n", destructive)
 		}
 
+		if reviewDryRun {
+			fmt.Fprintln(os.Stderr, "[dry-run] Would approve the following:")
+			for _, t := range pendingTools {
+				fmt.Fprintf(os.Stderr, "  tool: %s (pending -> enabled)\n", t.Name)
+			}
+			for _, r := range pendingResources {
+				fmt.Fprintf(os.Stderr, "  resource: %s (pending -> enabled)\n", r.Name)
+			}
+			fmt.Fprintf(os.Stderr, "[dry-run] Total: %d tools, %d resources\n", len(pendingTools), len(pendingResources))
+			return nil
+		}
+
 		for _, t := range pendingTools {
 			if err := store.UpdateToolState(t.Name, "enabled"); err != nil {
 				return fmt.Errorf("approve %q: %w", t.Name, err)
@@ -153,6 +169,19 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	// Batch mode: apply --approve, --disable, and --confirm flags directly.
 	if len(approveList) > 0 || len(disableList) > 0 || len(confirmList) > 0 {
+		if reviewDryRun {
+			fmt.Fprintln(os.Stderr, "[dry-run] Would apply the following changes:")
+			for _, name := range approveList {
+				fmt.Fprintf(os.Stderr, "  %s -> enabled\n", name)
+			}
+			for _, name := range disableList {
+				fmt.Fprintf(os.Stderr, "  %s -> disabled\n", name)
+			}
+			for _, name := range confirmList {
+				fmt.Fprintf(os.Stderr, "  %s -> requires_confirmation\n", name)
+			}
+			return nil
+		}
 		return reviewBatch(store, cfg, ws.ProjectDir, approveList, disableList, confirmList, resourceNames)
 	}
 

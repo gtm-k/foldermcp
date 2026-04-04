@@ -18,8 +18,10 @@ import (
 
 // ExecutorConfig controls resource limits for subprocess execution.
 type ExecutorConfig struct {
-	TimeoutSeconds int // Max execution time; default 30.
-	MaxOutputBytes int // Max combined stdout+stderr; default 100KB.
+	TimeoutSeconds int    // Max execution time; default 30.
+	MaxOutputBytes int    // Max combined stdout+stderr; default 100KB.
+	MaxConcurrent  int    // Max concurrent subprocesses; default runtime.NumCPU().
+	WorkspaceRoot  string // Root directory for path validation; empty disables the check.
 }
 
 // ExecutionResult captures the output of a subprocess invocation.
@@ -31,12 +33,15 @@ type ExecutionResult struct {
 }
 
 // Executor runs Python code as subprocesses with resource limits.
+// A channel-based semaphore gates how many subprocesses can run concurrently.
 type Executor struct {
-	config ExecutorConfig
+	config    ExecutorConfig
+	semaphore chan struct{}
 }
 
 // NewExecutor creates an Executor with the given config.
-// Zero-value fields get sensible defaults (30s timeout, 100KB output).
+// Zero-value fields get sensible defaults (30s timeout, 100KB output,
+// NumCPU concurrent subprocesses).
 func NewExecutor(config ExecutorConfig) *Executor {
 	if config.TimeoutSeconds <= 0 {
 		config.TimeoutSeconds = 30
@@ -44,7 +49,14 @@ func NewExecutor(config ExecutorConfig) *Executor {
 	if config.MaxOutputBytes <= 0 {
 		config.MaxOutputBytes = 100 * 1024
 	}
-	return &Executor{config: config}
+	maxConcurrent := config.MaxConcurrent
+	if maxConcurrent <= 0 {
+		maxConcurrent = runtime.NumCPU()
+	}
+	return &Executor{
+		config:    config,
+		semaphore: make(chan struct{}, maxConcurrent),
+	}
 }
 
 // findPython delegates to the shared pythonrt package.
@@ -91,9 +103,19 @@ func (e *Executor) RunPython(ctx context.Context, code string, venvPath string, 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	// Acquire semaphore slot before spawning subprocess.
+	select {
+	case e.semaphore <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context cancelled waiting for semaphore: %w", ctx.Err())
+	}
+
 	start := time.Now()
 	runErr := cmd.Run()
 	duration := time.Since(start)
+
+	// Release semaphore slot.
+	<-e.semaphore
 
 	// Check for timeout / context cancellation.
 	if ctx.Err() != nil {
@@ -136,18 +158,91 @@ if asyncio.iscoroutine(result):
 print("null" if result is None else json.dumps(result))
 `
 
+// validatePath checks that sourcePath is within workspaceRoot after resolving
+// symlinks. This prevents path-traversal attacks and symlink escapes.
+func validatePath(sourcePath, workspaceRoot string) error {
+	absSource, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return err
+	}
+	absSource, err = filepath.EvalSymlinks(absSource)
+	if err != nil {
+		return err
+	}
+	absRoot, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(absSource, absRoot+string(filepath.Separator)) && absSource != absRoot {
+		return fmt.Errorf("path %q is outside workspace %q", absSource, absRoot)
+	}
+	return nil
+}
+
 // RunPythonFile loads a Python file, calls a specific function with JSON args,
 // and returns the JSON-encoded result.
+// If WorkspaceRoot is set, .env variables from that directory are loaded and
+// merged (per-tool env vars take precedence over .env values).
 func (e *Executor) RunPythonFile(ctx context.Context, filePath, funcName, argsJSON, venvPath string, env map[string]string) (*ExecutionResult, error) {
+	// Validate that the file is within the workspace boundary (Fix 1 + Fix 5:
+	// EvalSymlinks inside validatePath also catches symlink escapes).
+	if e.config.WorkspaceRoot != "" {
+		if err := validatePath(filePath, e.config.WorkspaceRoot); err != nil {
+			return nil, fmt.Errorf("path validation failed: %w", err)
+		}
+	}
+
 	// Pass untrusted data via environment variables, not string interpolation.
 	if env == nil {
 		env = make(map[string]string)
 	}
+
+	// Load .env from workspace root, merging underneath per-tool env vars.
+	if e.config.WorkspaceRoot != "" {
+		dotEnv, err := LoadDotEnv(e.config.WorkspaceRoot)
+		if err != nil {
+			return nil, fmt.Errorf("load .env: %w", err)
+		}
+		for k, v := range dotEnv {
+			if _, exists := env[k]; !exists {
+				env[k] = v
+			}
+		}
+	}
+
 	env["_FOLDERMCP_FILE"] = filePath
 	env["_FOLDERMCP_FUNC"] = funcName
 	env["_FOLDERMCP_ARGS"] = argsJSON
 
 	return e.RunPython(ctx, pythonFileScript, venvPath, env)
+}
+
+// LoadDotEnv reads a .env file from dir and returns the key-value pairs.
+// Returns nil, nil if the file does not exist.
+func LoadDotEnv(dir string) (map[string]string, error) {
+	envPath := filepath.Join(dir, ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			val = strings.Trim(val, `"'`)
+			env[key] = val
+		}
+	}
+	return env, nil
 }
 
 // truncateBytes converts bytes to string, truncating if over limit.

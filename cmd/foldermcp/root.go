@@ -10,6 +10,9 @@ import (
 // version is set at build time via -ldflags.
 var version = "dev"
 
+// jsonOutput controls whether commands emit JSON to stdout.
+var jsonOutput bool
+
 var rootCmd = &cobra.Command{
 	Use:   "foldermcp",
 	Short: "Turn folders into secure MCP tool servers",
@@ -21,6 +24,7 @@ so that any folder of scripts becomes a plug-and-play AI tool server.`,
 
 func init() {
 	rootCmd.Version = version
+	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 }
 
 // Execute runs the root command.

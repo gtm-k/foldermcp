@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,6 +50,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(tools) == 0 && len(resources) == 0 {
+		if jsonOutput {
+			fmt.Println("{}")
+			return nil
+		}
 		fmt.Fprintln(os.Stderr, "No tools or resources found. Run 'foldermcp init' first.")
 		return nil
 	}
@@ -65,6 +70,22 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	resCounts := map[string]int{}
 	for _, r := range resources {
 		resCounts[r.State]++
+	}
+
+	if jsonOutput {
+		statusObj := map[string]interface{}{
+			"total_tools":     len(tools),
+			"total_resources": len(resources),
+			"tool_states":     stateCounts,
+			"dep_states":      depStateCounts,
+			"resource_states": resCounts,
+		}
+		data, err := json.MarshalIndent(statusObj, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal status: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
 	}
 
 	_, _ = fmt.Fprintf(os.Stdout, "FolderMCP Status (%d tools, %d resources)\n", len(tools), len(resources))

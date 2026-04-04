@@ -6,14 +6,17 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/foldermcp/foldermcp/internal/audit"
 	"github.com/foldermcp/foldermcp/internal/config"
+	"github.com/foldermcp/foldermcp/internal/introspect"
 	"github.com/foldermcp/foldermcp/internal/sandbox"
 	"github.com/foldermcp/foldermcp/internal/server"
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/watcher"
 	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -33,6 +36,8 @@ func init() {
 	serveCmd.Flags().String("mode", "dev", "server mode: dev, team, production")
 	serveCmd.Flags().Int("port", defaultHTTPPort, "HTTP listen port (used in team/production mode)")
 	serveCmd.Flags().String("transport", "stdio", "transport protocol: stdio or http")
+	serveCmd.Flags().String("profile", "", "Only serve tools in this profile (from tool_routing.profiles in config)")
+	serveCmd.Flags().Bool("watch", false, "Watch for file changes and reload tools")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -63,6 +68,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = store.Close() }()
 
+	profile, _ := cmd.Flags().GetString("profile")
+
 	tools, err := store.ListTools()
 	if err != nil {
 		return fmt.Errorf("list tools: %w", err)
@@ -71,6 +78,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 	resources, err := store.ListResources()
 	if err != nil {
 		return fmt.Errorf("list resources: %w", err)
+	}
+
+	// Filter tools by profile if specified.
+	if profile != "" {
+		profileTools, ok := cfg.ToolRouting.Profiles[profile]
+		if !ok {
+			return fmt.Errorf("profile %q not found in tool_routing.profiles", profile)
+		}
+		allowed := make(map[string]bool, len(profileTools))
+		for _, name := range profileTools {
+			allowed[name] = true
+		}
+		var filtered []state.Tool
+		for _, t := range tools {
+			if allowed[t.Name] {
+				filtered = append(filtered, t)
+			}
+		}
+		tools = filtered
+		fmt.Fprintf(os.Stderr, "Profile %q: filtered to %d tools\n", profile, len(tools))
 	}
 
 	// Count enabled tools and resources.
@@ -90,10 +117,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no enabled tools or resources found; run 'foldermcp review' to approve tools")
 	}
 
-	// Create sandbox executor.
+	// Create sandbox executor with workspace root for path traversal validation.
 	executor := sandbox.NewExecutor(sandbox.ExecutorConfig{
 		TimeoutSeconds: 30,
 		MaxOutputBytes: 100 * 1024,
+		WorkspaceRoot:  ws.ProjectDir,
 	})
 
 	// Create sanitizer.
@@ -117,6 +145,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("create MCP server: %w", err)
 	}
 
+	// Check for .env file and log if found.
+	dotEnv, dotEnvErr := sandbox.LoadDotEnv(ws.ProjectDir)
+	if dotEnvErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to read .env: %v\n", dotEnvErr)
+	} else if len(dotEnv) > 0 {
+		fmt.Fprintf(os.Stderr, "Loaded %d variable(s) from .env\n", len(dotEnv))
+	}
+
 	// Print status to stderr (stdout is reserved for MCP protocol).
 	fmt.Fprintf(os.Stderr, "FolderMCP server starting (mode=%s, tools=%d, resources=%d)\n", mode, enabledCount, enabledResCount)
 	if cfg.ToolRouting.MaxToolsPerContext > 0 {
@@ -128,6 +164,35 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	if useHTTP {
 		return serveHTTP(mcpServer, ws, port)
+	}
+
+	// Start file watcher if --watch is set.
+	watchEnabled, _ := cmd.Flags().GetBool("watch")
+	if watchEnabled {
+		interval := 2 * time.Second
+		if ws.IsNetworkFS {
+			interval = 5 * time.Second
+		}
+		fw := watcher.New(ws.ProjectDir, interval, cfg.Scan.Include, cfg.Scan.Exclude)
+		events := fw.Start()
+		defer fw.Stop()
+
+		registry := introspect.NewRegistry()
+		go func() {
+			for ev := range events {
+				if ev.Type == "deleted" {
+					fmt.Fprintf(os.Stderr, "[watch] %s deleted\n", ev.Path)
+					continue
+				}
+				tools, err := registry.ScanDirectory(context.Background(), ws.ProjectDir, cfg.Scan.Include, cfg.Scan.Exclude)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "[watch] re-scan error: %v\n", err)
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "[watch] %s %s — re-scanned %d tools\n", ev.Path, ev.Type, len(tools))
+			}
+		}()
+		fmt.Fprintf(os.Stderr, "File watching enabled (interval=%s)\n", interval)
 	}
 
 	// Set up signal handling for stdio mode.
@@ -165,9 +230,16 @@ func serveHTTP(mcpServer *server.MCPServer, ws *workspace.Workspace, port int) e
 
 	addr := fmt.Sprintf(":%d", port)
 
+	// Mask the API key: show prefix (first 7 chars) and suffix (last 4 chars),
+	// replace the middle with asterisks.
+	maskedKey := apiKey
+	if len(apiKey) > 11 {
+		maskedKey = apiKey[:7] + strings.Repeat("*", len(apiKey)-11) + apiKey[len(apiKey)-4:]
+	}
+
 	fmt.Fprintf(os.Stderr, "\n--- FolderMCP Team Server ---\n")
 	fmt.Fprintf(os.Stderr, "URL:     https://localhost%s/mcp\n", addr)
-	fmt.Fprintf(os.Stderr, "API Key: %s\n", apiKey)
+	fmt.Fprintf(os.Stderr, "API Key: %s\n", maskedKey)
 	fmt.Fprintf(os.Stderr, "TLS:     self-signed (cert=%s)\n", certFile)
 	fmt.Fprintf(os.Stderr, "-----------------------------\n\n")
 

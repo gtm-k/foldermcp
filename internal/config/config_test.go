@@ -41,6 +41,30 @@ func TestLoadConfig_DefaultsWhenNoFile(t *testing.T) {
 		}
 	}
 
+	// Default resource excludes must contain sensitive file patterns.
+	sensitiveExcludes := []string{
+		"**/.env",
+		"**/.env.*",
+		"**/*.key",
+		"**/*.pem",
+		"**/*.p12",
+		"**/credentials.json",
+		"**/secrets.yaml",
+		"**/secrets.yml",
+	}
+	for _, want := range sensitiveExcludes {
+		found := false
+		for _, got := range cfg.Scan.ResourceExclude {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected default resource exclude %q not found in %v", want, cfg.Scan.ResourceExclude)
+		}
+	}
+
 	// Default includes must be present.
 	if len(cfg.Scan.Include) == 0 {
 		t.Error("expected default include patterns, got empty slice")

@@ -17,7 +17,7 @@ var connectCmd = &cobra.Command{
 	Use:   "connect <client>",
 	Short: "Configure a client to use this FolderMCP server",
 	Long: `Adds this FolderMCP workspace as an MCP server in the target client's
-configuration. Currently supports: claude-desktop, cursor.`,
+configuration. Currently supports: claude-desktop, claude-code, cursor.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runConnect,
 }
@@ -33,10 +33,12 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	switch client {
 	case "claude-desktop":
 		return connectClaudeDesktop()
+	case "claude-code":
+		return connectClaudeCode()
 	case "cursor":
 		return connectCursor()
 	default:
-		return fmt.Errorf("unsupported client %q; supported: claude-desktop, cursor", client)
+		return fmt.Errorf("unsupported client %q; supported: claude-desktop, claude-code, cursor", client)
 	}
 }
 
@@ -114,6 +116,78 @@ func connectClaudeDesktop() error {
 	fmt.Fprintf(os.Stderr, "Updated %s\n", configPath)
 	fmt.Fprintln(os.Stderr, "Added 'foldermcp' to mcpServers.")
 	fmt.Fprintln(os.Stderr, "Restart Claude Desktop to pick up the change.")
+
+	return nil
+}
+
+func connectClaudeCode() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("determine home directory: %w", err)
+	}
+	configPath := filepath.Join(home, ".claude.json")
+
+	// Read existing config or start with empty object.
+	var configMap map[string]interface{}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("read Claude Code config: %w", err)
+		}
+		configMap = make(map[string]interface{})
+	} else {
+		if err := json.Unmarshal(data, &configMap); err != nil {
+			return fmt.Errorf("parse Claude Code config: %w", err)
+		}
+	}
+
+	// Find foldermcp binary path.
+	binaryPath, err := exec.LookPath("foldermcp")
+	if err != nil {
+		// Fall back to the current executable.
+		binaryPath, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("determine foldermcp binary path: %w", err)
+		}
+	}
+
+	// Build the mcpServers entry.
+	serverEntry := map[string]interface{}{
+		"command": binaryPath,
+		"args":    []string{"serve", "--mode=" + connectMode},
+	}
+
+	// Ensure mcpServers key exists.
+	mcpServers, ok := configMap["mcpServers"].(map[string]interface{})
+	if !ok {
+		mcpServers = make(map[string]interface{})
+	}
+	mcpServers["foldermcp"] = serverEntry
+	configMap["mcpServers"] = mcpServers
+
+	// Write config back.
+	output, err := json.MarshalIndent(configMap, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	// Ensure parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return fmt.Errorf("create config directory: %w", err)
+	}
+
+	tmpPath := configPath + ".tmp"
+	if err := os.WriteFile(tmpPath, output, 0644); err != nil {
+		return fmt.Errorf("writing temp config: %w", err)
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
+		return fmt.Errorf("renaming config: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Updated %s\n", configPath)
+	fmt.Fprintln(os.Stderr, "Added 'foldermcp' to mcpServers.")
+	fmt.Fprintln(os.Stderr, "Claude Code will pick up the change automatically.")
 
 	return nil
 }

@@ -63,10 +63,11 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 		defer func() { _ = logger.Close() }()
 	}
 
-	// Create executor.
+	// Create executor with workspace root for path traversal validation.
 	executor := sandbox.NewExecutor(sandbox.ExecutorConfig{
 		TimeoutSeconds: 30,
 		MaxOutputBytes: 100 * 1024,
+		WorkspaceRoot:  ws.ProjectDir,
 	})
 
 	// Create sanitizer.

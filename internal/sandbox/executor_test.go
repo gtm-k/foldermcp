@@ -147,6 +147,89 @@ func TestExecutor_SyntaxError(t *testing.T) {
 	}
 }
 
+func TestValidatePath_InsideWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	inner := filepath.Join(dir, "subdir")
+	if err := os.MkdirAll(inner, 0755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(inner, "tool.py")
+	if err := os.WriteFile(file, []byte("pass"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := validatePath(file, dir); err != nil {
+		t.Errorf("expected no error for path inside workspace, got: %v", err)
+	}
+}
+
+func TestValidatePath_OutsideWorkspace(t *testing.T) {
+	workspaceDir := t.TempDir()
+	outsideDir := t.TempDir()
+	file := filepath.Join(outsideDir, "evil.py")
+	if err := os.WriteFile(file, []byte("pass"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validatePath(file, workspaceDir)
+	if err == nil {
+		t.Fatal("expected error for path outside workspace, got nil")
+	}
+	if !strings.Contains(err.Error(), "outside workspace") {
+		t.Errorf("expected 'outside workspace' in error, got: %v", err)
+	}
+}
+
+func TestValidatePath_WorkspaceRootItself(t *testing.T) {
+	dir := t.TempDir()
+	// The workspace root itself should be accepted.
+	if err := validatePath(dir, dir); err != nil {
+		t.Errorf("expected no error for workspace root itself, got: %v", err)
+	}
+}
+
+func TestRunPythonFile_PathTraversalBlocked(t *testing.T) {
+	workspaceDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// Create a Python file outside the workspace.
+	outsideFile := filepath.Join(outsideDir, "evil.py")
+	if err := os.WriteFile(outsideFile, []byte("def evil(): return 'pwned'"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := NewExecutor(ExecutorConfig{
+		WorkspaceRoot: workspaceDir,
+	})
+
+	_, err := e.RunPythonFile(context.Background(), outsideFile, "evil", "{}", "", nil)
+	if err == nil {
+		t.Fatal("expected path validation error, got nil")
+	}
+	if !strings.Contains(err.Error(), "path validation failed") {
+		t.Errorf("expected 'path validation failed' in error, got: %v", err)
+	}
+}
+
+func TestRunPythonFile_NoWorkspaceRoot_Allowed(t *testing.T) {
+	// When WorkspaceRoot is empty, path validation is skipped.
+	dir := t.TempDir()
+	pyFile := filepath.Join(dir, "tool.py")
+	if err := os.WriteFile(pyFile, []byte("def hello(): return 'hi'"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := NewExecutor(ExecutorConfig{})
+
+	result, err := e.RunPythonFile(context.Background(), pyFile, "hello", "{}", "", nil)
+	if err != nil {
+		t.Fatalf("expected no error when WorkspaceRoot is empty, got: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d (stderr: %s)", result.ExitCode, result.Stderr)
+	}
+}
+
 func TestSanitizer_TruncatesOutput(t *testing.T) {
 	s := NewSanitizer(100)
 
