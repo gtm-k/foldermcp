@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/foldermcp/foldermcp/internal/lifecycle"
 	_ "modernc.org/sqlite"
 )
 
@@ -176,11 +177,24 @@ var validDepStates = map[string]bool{
 }
 
 // UpdateToolState sets the state column for the named tool.
-// Returns an error if the state is invalid or the tool does not exist.
+// Returns an error if the state is invalid, the transition is not allowed,
+// or the tool does not exist.
 func (s *Store) UpdateToolState(name, newState string) error {
 	if !validToolStates[newState] {
 		return fmt.Errorf("invalid tool state %q", newState)
 	}
+
+	// Validate state transition when the tool already exists.
+	current, err := s.GetTool(name)
+	if err != nil {
+		return fmt.Errorf("get tool for transition check: %w", err)
+	}
+	if current != nil {
+		if err := lifecycle.ValidateTransition(current.State, newState); err != nil {
+			return err
+		}
+	}
+
 	res, err := s.db.Exec("UPDATE tools SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?", newState, name)
 	if err != nil {
 		return fmt.Errorf("update tool state: %w", err)

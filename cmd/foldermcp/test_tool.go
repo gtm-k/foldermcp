@@ -14,35 +14,34 @@ import (
 )
 
 var testToolCmd = &cobra.Command{
-	Use:   "test <tool-name>",
+	Use:   "test [tool-name]",
 	Short: "Test a tool by running it locally",
 	Long: `Executes a single tool with the given JSON parameters and displays the
-output, exit code, and duration. Useful for verifying tools before serving.`,
-	Args: cobra.ExactArgs(1),
+output, exit code, and duration. Useful for verifying tools before serving.
+Use --all to smoke-test all enabled tools with empty params.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runTestTool,
 }
 
 var testForce bool
+var testAll bool
 
 func init() {
 	testToolCmd.Flags().String("params", "{}", "JSON parameters to pass to the tool")
 	testToolCmd.Flags().BoolVar(&testForce, "force", false, "Execute even if tool is pending/disabled (bypass safety check)")
+	testToolCmd.Flags().BoolVar(&testAll, "all", false, "Smoke-test all enabled tools with empty params")
 	rootCmd.AddCommand(testToolCmd)
 }
 
 func runTestTool(cmd *cobra.Command, args []string) error {
-	toolName := args[0]
-	paramsStr, _ := cmd.Flags().GetString("params")
+	// Require either --all or a tool name.
+	if !testAll && len(args) == 0 {
+		return fmt.Errorf("provide a <tool-name> or use --all")
+	}
 
 	dir, err := filepath.Abs(".")
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
-	}
-
-	// Validate params JSON.
-	var params map[string]interface{}
-	if err := json.Unmarshal([]byte(paramsStr), &params); err != nil {
-		return fmt.Errorf("invalid --params JSON: %w", err)
 	}
 
 	// Open state store.
@@ -58,6 +57,55 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 	logger, err := audit.NewLogger(logPath)
 	if err == nil {
 		defer logger.Close()
+	}
+
+	// Create executor.
+	executor := sandbox.NewExecutor(sandbox.ExecutorConfig{
+		TimeoutSeconds: 30,
+		MaxOutputBytes: 100 * 1024,
+	})
+
+	// Create sanitizer.
+	sanitizer := sandbox.NewSanitizer(100 * 1024)
+
+	ctx := context.Background()
+
+	// --all: smoke-test all enabled tools with empty params.
+	if testAll {
+		tools, err := store.ListTools()
+		if err != nil {
+			return fmt.Errorf("list tools: %w", err)
+		}
+		passed, failed := 0, 0
+		for _, t := range tools {
+			if t.State != "enabled" && t.State != "requires_confirmation" {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "Testing %s... ", t.Name)
+			result, err := executor.RunPythonFile(ctx, t.SourceFile, t.Name, "{}", "", nil)
+			if err != nil || result.ExitCode != 0 {
+				fmt.Fprintln(os.Stderr, "FAIL")
+				failed++
+			} else {
+				fmt.Fprintln(os.Stderr, "OK")
+				passed++
+			}
+		}
+		fmt.Fprintf(os.Stderr, "\n%d passed, %d failed\n", passed, failed)
+		if failed > 0 {
+			return fmt.Errorf("%d tool(s) failed", failed)
+		}
+		return nil
+	}
+
+	// Single tool test.
+	toolName := args[0]
+	paramsStr, _ := cmd.Flags().GetString("params")
+
+	// Validate params JSON.
+	var params map[string]interface{}
+	if err := json.Unmarshal([]byte(paramsStr), &params); err != nil {
+		return fmt.Errorf("invalid --params JSON: %w", err)
 	}
 
 	// Get tool.
@@ -78,15 +126,6 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "WARNING: --force flag set, bypassing tool state check\n")
 	}
 
-	// Create executor.
-	executor := sandbox.NewExecutor(sandbox.ExecutorConfig{
-		TimeoutSeconds: 30,
-		MaxOutputBytes: 100 * 1024,
-	})
-
-	// Create sanitizer.
-	sanitizer := sandbox.NewSanitizer(100 * 1024)
-
 	// Run tool.
 	fmt.Fprintf(os.Stderr, "Testing tool: %s\n", tool.Name)
 	fmt.Fprintf(os.Stderr, "Source: %s\n", tool.SourceFile)
@@ -94,7 +133,7 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stderr, "---")
 
 	result, err := executor.RunPythonFile(
-		context.Background(),
+		ctx,
 		tool.SourceFile,
 		tool.Name,
 		paramsStr,
@@ -136,6 +175,7 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 	}
 
 	if result.ExitCode != 0 {
+		fmt.Fprintf(os.Stderr, "Stderr:\n%s\n", stderr)
 		return fmt.Errorf("tool exited with code %d", result.ExitCode)
 	}
 

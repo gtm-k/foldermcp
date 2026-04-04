@@ -20,10 +20,13 @@ is reviewed individually. Use --approve and --disable flags for batch mode.`,
 	RunE: runReview,
 }
 
+var reviewApproveAll bool
+
 func init() {
 	reviewCmd.Flags().StringSlice("approve", nil, "tool names to approve (batch mode)")
 	reviewCmd.Flags().StringSlice("disable", nil, "tool names to disable (batch mode)")
 	reviewCmd.Flags().StringSlice("confirm", nil, "tool names to set as requires_confirmation (batch mode)")
+	reviewCmd.Flags().BoolVar(&reviewApproveAll, "approve-all", false, "Approve all pending tools")
 	reviewCmd.Flags().String("mode", "dev", "review mode: dev, team, production")
 	rootCmd.AddCommand(reviewCmd)
 }
@@ -78,6 +81,45 @@ func runReview(cmd *cobra.Command, args []string) error {
 	if len(tools) == 0 {
 		fmt.Fprintln(os.Stderr, "No tools found. Run 'foldermcp init' first.")
 		return nil
+	}
+
+	// --approve-all: approve all pending tools non-interactively.
+	if reviewApproveAll {
+		var pending []state.Tool
+		for _, t := range tools {
+			if t.State == "pending" {
+				pending = append(pending, t)
+			}
+		}
+		if len(pending) == 0 {
+			fmt.Fprintln(os.Stderr, "No pending tools to approve.")
+			return nil
+		}
+
+		// Warn about destructive tools.
+		destructive := 0
+		for _, t := range pending {
+			if t.Risk == "destructive" {
+				destructive++
+			}
+		}
+		if destructive > 0 {
+			fmt.Fprintf(os.Stderr, "WARNING: %d tool(s) labeled 'destructive' will be approved\n", destructive)
+		}
+
+		for _, t := range pending {
+			if err := store.UpdateToolState(t.Name, "enabled"); err != nil {
+				return fmt.Errorf("approve %q: %w", t.Name, err)
+			}
+			if cfg.Tools == nil {
+				cfg.Tools = make(map[string]config.ToolConfig)
+			}
+			tc := cfg.Tools[t.Name]
+			tc.State = "enabled"
+			cfg.Tools[t.Name] = tc
+		}
+		fmt.Fprintf(os.Stderr, "Approved %d tools\n", len(pending))
+		return config.Save(dir, cfg)
 	}
 
 	// Batch mode: apply --approve, --disable, and --confirm flags directly.
