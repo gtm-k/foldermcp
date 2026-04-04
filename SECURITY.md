@@ -7,9 +7,8 @@ responsibly. Do NOT open a public GitHub issue for security vulnerabilities.
 
 **Preferred methods:**
 
-- **GitHub Security Advisories:** Open a private advisory at
-  [github.com/foldermcp/foldermcp/security/advisories](https://github.com/foldermcp/foldermcp/security/advisories).
-- **Email:** Send details to `security@foldermcp.dev`.
+- **GitHub Security Advisories:** Create a GitHub Security Advisory at
+  [github.com/gtm-k/foldermcp/security/advisories](https://github.com/gtm-k/foldermcp/security/advisories).
 
 Include the following in your report:
 

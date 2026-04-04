@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/foldermcp/foldermcp/internal/audit"
-	"github.com/foldermcp/foldermcp/internal/sandbox"
-	"github.com/foldermcp/foldermcp/internal/state"
-	"github.com/foldermcp/foldermcp/internal/workspace"
+	"github.com/gtm-k/foldermcp/internal/audit"
+	"github.com/gtm-k/foldermcp/internal/sandbox"
+	"github.com/gtm-k/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

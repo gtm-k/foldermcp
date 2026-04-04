@@ -3,8 +3,8 @@ package server
 import (
 	"testing"
 
-	"github.com/foldermcp/foldermcp/internal/sandbox"
-	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/sandbox"
+	"github.com/gtm-k/foldermcp/internal/state"
 )
 
 func TestNewMCPServer_OnlyRegistersEnabledTools(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/foldermcp/foldermcp/internal/audit"
-	"github.com/foldermcp/foldermcp/internal/workspace"
+	"github.com/gtm-k/foldermcp/internal/audit"
+	"github.com/gtm-k/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

@@ -25,7 +25,7 @@ protocol translation automatically -- no SDK, no wrapper code, no manifest to ma
 
 ```bash
 # 1. Install
-go install github.com/foldermcp/foldermcp/cmd/foldermcp@latest
+go install github.com/gtm-k/foldermcp/cmd/foldermcp@latest
 
 # 2. Initialize
 foldermcp init ./my-tools

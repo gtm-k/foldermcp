@@ -7,12 +7,12 @@ need to get started.
 
 | Requirement | Version |
 |-------------|---------|
-| Go          | 1.23+   |
+| Go          | 1.25+   |
 | Python      | 3.10+   |
 | uv          | latest  |
 
 ```bash
-git clone https://github.com/foldermcp/foldermcp.git
+git clone https://github.com/gtm-k/foldermcp.git
 cd foldermcp
 make build        # compile binary to ./bin/foldermcp
 make test         # run all tests with race detection

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/state"
 )
 
 // setupTestServer creates a temporary state directory with a seeded database

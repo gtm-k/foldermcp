@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/state"
 )
 
 func TestGenerateAgentCard(t *testing.T) {

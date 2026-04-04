@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/foldermcp/foldermcp/internal/config"
-	"github.com/foldermcp/foldermcp/internal/state"
-	"github.com/foldermcp/foldermcp/internal/workspace"
+	"github.com/gtm-k/foldermcp/internal/config"
+	"github.com/gtm-k/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

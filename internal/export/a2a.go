@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/state"
 )
 
 // AgentCard represents an A2A-compatible agent card that describes this

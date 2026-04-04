@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/foldermcp/foldermcp/internal/state"
-	"github.com/foldermcp/foldermcp/internal/workspace"
+	"github.com/gtm-k/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/foldermcp/foldermcp/internal/audit"
-	"github.com/foldermcp/foldermcp/internal/sandbox"
-	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/audit"
+	"github.com/gtm-k/foldermcp/internal/sandbox"
+	"github.com/gtm-k/foldermcp/internal/state"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )

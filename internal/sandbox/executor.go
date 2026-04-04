@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/foldermcp/foldermcp/internal/pythonrt"
+	"github.com/gtm-k/foldermcp/internal/pythonrt"
 )
 
 // ExecutorConfig controls resource limits for subprocess execution.

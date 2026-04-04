@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/foldermcp/foldermcp/internal/lifecycle"
+	"github.com/gtm-k/foldermcp/internal/lifecycle"
 	_ "modernc.org/sqlite"
 )
 

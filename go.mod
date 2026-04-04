@@ -1,4 +1,4 @@
-module github.com/foldermcp/foldermcp
+module github.com/gtm-k/foldermcp
 
 go 1.25.0
 

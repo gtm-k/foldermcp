@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/foldermcp/foldermcp/internal/pythonrt"
+	"github.com/gtm-k/foldermcp/internal/pythonrt"
 )
 
 // PythonIntrospector extracts tool metadata from Python source files

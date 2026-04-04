@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/foldermcp/foldermcp/internal/studio"
-	"github.com/foldermcp/foldermcp/internal/workspace"
+	"github.com/gtm-k/foldermcp/internal/studio"
+	"github.com/gtm-k/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
