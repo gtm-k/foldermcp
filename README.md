@@ -1,7 +1,7 @@
 # FolderMCP
 
 [![CI](https://github.com/gtm-k/foldermcp/actions/workflows/ci.yml/badge.svg)](https://github.com/gtm-k/foldermcp/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/gtm-k/foldermcp)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8.svg?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io)
 
