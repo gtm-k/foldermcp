@@ -15,7 +15,7 @@ var secretPatterns = []*regexp.Regexp{
 	// Generic API key patterns in key=value or key: value
 	regexp.MustCompile(`(?i)(?:api[_-]?key|apikey)\s*[:=]\s*\S{10,}`),
 	// GitHub personal access tokens
-	regexp.MustCompile(`ghp_[A-Za-z0-9]{36,}`),
+	regexp.MustCompile(`ghp_[A-Za-z0-9]{20,}`),
 	// GitHub fine-grained tokens
 	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),
 	// OpenAI / Anthropic keys (sk-...)

@@ -45,7 +45,12 @@ func runUI(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Fprintf(os.Stderr, "Studio available at http://localhost:%d\n", port)
+	fmt.Fprintf(os.Stderr, "\nFolderMCP Developer Studio\n")
+	fmt.Fprintf(os.Stderr, "  Dashboard:  http://localhost:%d\n", port)
+	fmt.Fprintf(os.Stderr, "  API:        http://localhost:%d/api/tools\n", port)
+	fmt.Fprintf(os.Stderr, "  Audit Log:  http://localhost:%d/api/audit\n", port)
+	fmt.Fprintf(os.Stderr, "  Status:     http://localhost:%d/api/status\n", port)
+	fmt.Fprintf(os.Stderr, "\nPress Ctrl+C to stop.\n")
 
 	// Start server in a goroutine so we can listen for the interrupt signal.
 	errCh := make(chan error, 1)

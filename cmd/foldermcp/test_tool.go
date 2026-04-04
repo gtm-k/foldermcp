@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/foldermcp/foldermcp/internal/audit"
 	"github.com/foldermcp/foldermcp/internal/sandbox"
 	"github.com/foldermcp/foldermcp/internal/state"
 	"github.com/spf13/cobra"
@@ -48,6 +49,13 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open state store: %w", err)
 	}
 	defer store.Close()
+
+	// Create audit logger.
+	logPath := filepath.Join(stateDir, "audit.log")
+	logger, err := audit.NewLogger(logPath)
+	if err == nil {
+		defer logger.Close()
+	}
 
 	// Get tool.
 	tool, err := store.GetTool(toolName)
@@ -104,6 +112,15 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 	fmt.Print(stdout)
 	if len(stdout) > 0 && stdout[len(stdout)-1] != '\n' {
 		fmt.Println()
+	}
+
+	// Log the invocation to the audit log.
+	status := "success"
+	if result.ExitCode != 0 {
+		status = "error"
+	}
+	if logger != nil {
+		logger.Log(tool.Name, "test", sanitizer.SanitizeParams(paramsStr), "", status)
 	}
 
 	if result.ExitCode != 0 {

@@ -26,15 +26,20 @@ type Capability struct {
 }
 
 // GenerateAgentCard creates an AgentCard from the given metadata and tool list.
-// Each tool with a non-empty State of "approved" (or any tool if no state
-// filtering is needed) is mapped to a Capability entry.
+// Only tools with State "enabled" or "requires_confirmation" are included as
+// capabilities; disabled or unknown-state tools are excluded.
 func GenerateAgentCard(name, version, url string, tools []state.Tool) *AgentCard {
-	capabilities := make([]Capability, 0, len(tools))
+	var capabilities []Capability
 	for _, t := range tools {
-		capabilities = append(capabilities, Capability{
-			Name:        t.Name,
-			Description: t.Description,
-		})
+		if t.State == "enabled" || t.State == "requires_confirmation" {
+			capabilities = append(capabilities, Capability{
+				Name:        t.Name,
+				Description: t.Description,
+			})
+		}
+	}
+	if capabilities == nil {
+		capabilities = []Capability{}
 	}
 
 	return &AgentCard{

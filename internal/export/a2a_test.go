@@ -11,9 +11,9 @@ import (
 
 func TestGenerateAgentCard(t *testing.T) {
 	tools := []state.Tool{
-		{Name: "add_numbers", Description: "Add two numbers together"},
-		{Name: "deploy", Description: "Deploy the application to staging"},
-		{Name: "health_check", Description: "Check service health status"},
+		{Name: "add_numbers", Description: "Add two numbers together", State: "enabled"},
+		{Name: "deploy", Description: "Deploy the application to staging", State: "enabled"},
+		{Name: "health_check", Description: "Check service health status", State: "requires_confirmation"},
 	}
 
 	card := GenerateAgentCard("my-project", "1.0.0", "http://localhost:3000", tools)
@@ -42,6 +42,27 @@ func TestGenerateAgentCard(t *testing.T) {
 	// Verify descriptions are carried through.
 	if card.Capabilities[0].Description != "Add two numbers together" {
 		t.Errorf("unexpected description: %q", card.Capabilities[0].Description)
+	}
+}
+
+func TestGenerateAgentCard_FiltersDisabledTools(t *testing.T) {
+	tools := []state.Tool{
+		{Name: "enabled_tool", Description: "Enabled", State: "enabled"},
+		{Name: "disabled_tool", Description: "Disabled", State: "disabled"},
+		{Name: "confirm_tool", Description: "Needs confirmation", State: "requires_confirmation"},
+		{Name: "unknown_tool", Description: "Unknown state", State: ""},
+	}
+
+	card := GenerateAgentCard("filter-test", "1.0.0", "http://localhost:3000", tools)
+
+	if len(card.Capabilities) != 2 {
+		t.Fatalf("expected 2 capabilities (disabled and empty-state excluded), got %d", len(card.Capabilities))
+	}
+	if card.Capabilities[0].Name != "enabled_tool" {
+		t.Errorf("expected first capability 'enabled_tool', got %q", card.Capabilities[0].Name)
+	}
+	if card.Capabilities[1].Name != "confirm_tool" {
+		t.Errorf("expected second capability 'confirm_tool', got %q", card.Capabilities[1].Name)
 	}
 }
 

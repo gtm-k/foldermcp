@@ -3,6 +3,7 @@ package introspect
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,11 +52,15 @@ func (r *Registry) ScanDirectory(ctx context.Context, dir string, includes, excl
 
 	var allTools []ToolMetadata
 
-	walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return nil
 		}
-		if info.IsDir() {
+		if d.IsDir() {
+			return nil
+		}
+		// Skip symlinks explicitly for safety.
+		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
 
