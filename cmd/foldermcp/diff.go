@@ -76,7 +76,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	// New tools: in discovered but not in current state.
 	for _, d := range discovered {
 		if _, exists := currentMap[d.Name]; !exists {
-			fmt.Fprintf(os.Stdout, "+ %s (%s)\n", d.Name, d.SourceFile)
+			_, _ = fmt.Fprintf(os.Stdout, "+ %s (%s)\n", d.Name, d.SourceFile)
 			changes++
 		}
 	}
@@ -84,7 +84,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	// Removed tools: in current state but not in discovered.
 	for _, c := range currentTools {
 		if _, exists := discoveredMap[c.Name]; !exists {
-			fmt.Fprintf(os.Stdout, "- %s\n", c.Name)
+			_, _ = fmt.Fprintf(os.Stdout, "- %s\n", c.Name)
 			changes++
 		}
 	}
@@ -115,7 +115,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		}
 
 		if len(reasons) > 0 {
-			fmt.Fprintf(os.Stdout, "~ %s (%s)\n", d.Name, joinReasons(reasons))
+			_, _ = fmt.Fprintf(os.Stdout, "~ %s (%s)\n", d.Name, joinReasons(reasons))
 			changes++
 		}
 	}

@@ -173,6 +173,10 @@ func validatePath(sourcePath, workspaceRoot string) error {
 	if err != nil {
 		return err
 	}
+	absRoot, err = filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return err
+	}
 	if !strings.HasPrefix(absSource, absRoot+string(filepath.Separator)) && absSource != absRoot {
 		return fmt.Errorf("path %q is outside workspace %q", absSource, absRoot)
 	}

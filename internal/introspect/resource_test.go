@@ -73,10 +73,10 @@ func TestResourceIntrospector_SkipsLargeFiles(t *testing.T) {
 	// Write just enough to exceed the limit (50 MB + 1 byte).
 	// Use Truncate to quickly set the size without writing data.
 	if err := f.Truncate(50*1024*1024 + 1); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatalf("truncate: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	// Also create a small file to verify normal discovery still works.
 	writeFile(t, dir, "small.csv", "a,b,c")

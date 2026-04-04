@@ -28,8 +28,9 @@ func detectNetworkFSPlatform(path string) bool {
 		return false
 	}
 
-	// Convert f_fstypename (int8 array) to a Go string.
-	fstype := int8ArrayToString(stat.Fstypename[:])
+	// Convert f_fstypename to a Go string.
+	// Fstypename is [16]byte on modern Go/macOS.
+	fstype := byteArrayToString(stat.Fstypename[:])
 	fstype = strings.ToLower(fstype)
 
 	for _, netType := range networkFSTypeNames {
@@ -40,14 +41,12 @@ func detectNetworkFSPlatform(path string) bool {
 	return false
 }
 
-// int8ArrayToString converts a null-terminated int8 slice to a Go string.
-func int8ArrayToString(arr []int8) string {
-	buf := make([]byte, 0, len(arr))
-	for _, b := range arr {
+// byteArrayToString converts a null-terminated byte slice to a Go string.
+func byteArrayToString(arr []byte) string {
+	for i, b := range arr {
 		if b == 0 {
-			break
+			return string(arr[:i])
 		}
-		buf = append(buf, byte(b))
 	}
-	return string(buf)
+	return string(arr)
 }
