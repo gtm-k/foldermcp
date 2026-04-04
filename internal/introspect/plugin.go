@@ -1,5 +1,7 @@
 package introspect
 
+import "context"
+
 // ToolMetadata describes a discovered tool from source code introspection.
 type ToolMetadata struct {
 	Name        string
@@ -22,8 +24,8 @@ type IntrospectorPlugin interface {
 	CanHandle(filePath string) bool
 
 	// ExtractTools parses the file and returns tool metadata.
-	ExtractTools(filePath string) ([]ToolMetadata, error)
+	ExtractTools(ctx context.Context, filePath string) ([]ToolMetadata, error)
 
 	// InferDependencies inspects the file for import/dependency declarations.
-	InferDependencies(filePath string) ([]Dependency, error)
+	InferDependencies(ctx context.Context, filePath string) ([]Dependency, error)
 }

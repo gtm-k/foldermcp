@@ -1,6 +1,7 @@
 package introspect
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -39,7 +40,7 @@ func TestOpenAPIIntrospector_ExtractTools(t *testing.T) {
 	o := &OpenAPIIntrospector{}
 	specPath := filepath.Join(testdataDir(), "openapi_simple", "petstore.yaml")
 
-	tools, err := o.ExtractTools(specPath)
+	tools, err := o.ExtractTools(context.Background(), specPath)
 	if err != nil {
 		t.Fatalf("ExtractTools failed: %v", err)
 	}
@@ -156,7 +157,7 @@ func TestOpenAPIIntrospector_InferDependencies(t *testing.T) {
 	o := &OpenAPIIntrospector{}
 	specPath := filepath.Join(testdataDir(), "openapi_simple", "petstore.yaml")
 
-	deps, err := o.InferDependencies(specPath)
+	deps, err := o.InferDependencies(context.Background(), specPath)
 	if err != nil {
 		t.Fatalf("InferDependencies failed: %v", err)
 	}

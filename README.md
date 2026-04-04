@@ -51,6 +51,15 @@ example with several sample tools.
 | `foldermcp doctor` | Check environment for common issues |
 | `foldermcp deploy <target>` | Generate deployment artifacts |
 
+### Shell Completion
+
+FolderMCP supports shell completion for bash, zsh, fish, and PowerShell:
+
+    foldermcp completion bash > /etc/bash_completion.d/foldermcp
+    foldermcp completion zsh > "${fpath[1]}/_foldermcp"
+    foldermcp completion fish > ~/.config/fish/completions/foldermcp.fish
+    foldermcp completion powershell | Out-String | Invoke-Expression
+
 ## Features
 
 - **Auto-discovery** -- Scans directories for Python scripts and OpenAPI specs, extracts tool metadata from docstrings and schemas.

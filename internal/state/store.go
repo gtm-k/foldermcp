@@ -168,22 +168,43 @@ func (s *Store) ListTools() ([]Tool, error) {
 	return tools, nil
 }
 
+var validToolStates = map[string]bool{
+	"pending": true, "enabled": true, "disabled": true, "requires_confirmation": true,
+}
+var validDepStates = map[string]bool{
+	"resolved": true, "resolving": true, "failed": true,
+}
+
 // UpdateToolState sets the state column for the named tool.
+// Returns an error if the state is invalid or the tool does not exist.
 func (s *Store) UpdateToolState(name, newState string) error {
-	const query = `UPDATE tools SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?`
-	_, err := s.db.Exec(query, newState, name)
+	if !validToolStates[newState] {
+		return fmt.Errorf("invalid tool state %q", newState)
+	}
+	res, err := s.db.Exec("UPDATE tools SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?", newState, name)
 	if err != nil {
-		return fmt.Errorf("update tool state %q: %w", name, err)
+		return fmt.Errorf("update tool state: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("tool %q not found", name)
 	}
 	return nil
 }
 
 // UpdateDepState sets the dep_state column for the named tool.
+// Returns an error if the state is invalid or the tool does not exist.
 func (s *Store) UpdateDepState(name, depState string) error {
-	const query = `UPDATE tools SET dep_state = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?`
-	_, err := s.db.Exec(query, depState, name)
+	if !validDepStates[depState] {
+		return fmt.Errorf("invalid dep state %q", depState)
+	}
+	res, err := s.db.Exec("UPDATE tools SET dep_state = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?", depState, name)
 	if err != nil {
-		return fmt.Errorf("update dep state %q: %w", name, err)
+		return fmt.Errorf("update dep state: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("tool %q not found", name)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package introspect
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"runtime"
@@ -42,7 +43,7 @@ func TestPythonIntrospector_ExtractTools(t *testing.T) {
 
 	p := &PythonIntrospector{}
 	filePath := filepath.Join(testdataDir(), "python_simple", "math_tools.py")
-	tools, err := p.ExtractTools(filePath)
+	tools, err := p.ExtractTools(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("ExtractTools() error: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestPythonIntrospector_SkipsPrivateFunctions(t *testing.T) {
 
 	p := &PythonIntrospector{}
 	filePath := filepath.Join(testdataDir(), "python_simple", "string_tools.py")
-	tools, err := p.ExtractTools(filePath)
+	tools, err := p.ExtractTools(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("ExtractTools() error: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestPythonIntrospector_InferDependencies(t *testing.T) {
 
 	p := &PythonIntrospector{}
 	filePath := filepath.Join(testdataDir(), "python_deps", "data_tool.py")
-	deps, err := p.InferDependencies(filePath)
+	deps, err := p.InferDependencies(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("InferDependencies() error: %v", err)
 	}
@@ -162,7 +163,7 @@ func TestRegistry_ScanDirectory(t *testing.T) {
 
 	reg := NewRegistry()
 	dir := filepath.Join(testdataDir(), "python_simple")
-	tools, err := reg.ScanDirectory(dir, []string{"**/*.py"}, nil)
+	tools, err := reg.ScanDirectory(context.Background(), dir, []string{"**/*.py"}, nil)
 	if err != nil {
 		t.Fatalf("ScanDirectory() error: %v", err)
 	}
@@ -180,7 +181,7 @@ func TestPythonIntrospector_ToolDecorator(t *testing.T) {
 
 	p := &PythonIntrospector{}
 	filePath := filepath.Join(testdataDir(), "python_decorator", "decorated_tools.py")
-	tools, err := p.ExtractTools(filePath)
+	tools, err := p.ExtractTools(context.Background(), filePath)
 	if err != nil {
 		t.Fatalf("ExtractTools() error: %v", err)
 	}
@@ -247,7 +248,7 @@ func TestRegistry_ScanDirectory_WithExclude(t *testing.T) {
 
 	reg := NewRegistry()
 	dir := filepath.Join(testdataDir(), "python_simple")
-	tools, err := reg.ScanDirectory(dir, []string{"**/*.py"}, []string{"**/string_tools.py"})
+	tools, err := reg.ScanDirectory(context.Background(), dir, []string{"**/*.py"}, []string{"**/string_tools.py"})
 	if err != nil {
 		t.Fatalf("ScanDirectory() error: %v", err)
 	}

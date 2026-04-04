@@ -18,7 +18,9 @@ func TestLogger_WritesJSONLine(t *testing.T) {
 	}
 	defer logger.Close()
 
-	logger.Log("my_tool", "invoke", `{"x":1}`, "test-caller", "success")
+	if err := logger.Log("my_tool", "invoke", `{"x":1}`, "test-caller", "success"); err != nil {
+		t.Fatalf("Log: %v", err)
+	}
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
@@ -61,9 +63,15 @@ func TestLogger_MultipleEntries(t *testing.T) {
 	}
 	defer logger.Close()
 
-	logger.Log("tool_a", "invoke", "", "", "success")
-	logger.Log("tool_b", "invoke", `{"key":"val"}`, "caller2", "error")
-	logger.Log("tool_c", "invoke", "", "", "success")
+	if err := logger.Log("tool_a", "invoke", "", "", "success"); err != nil {
+		t.Fatalf("Log tool_a: %v", err)
+	}
+	if err := logger.Log("tool_b", "invoke", `{"key":"val"}`, "caller2", "error"); err != nil {
+		t.Fatalf("Log tool_b: %v", err)
+	}
+	if err := logger.Log("tool_c", "invoke", "", "", "success"); err != nil {
+		t.Fatalf("Log tool_c: %v", err)
+	}
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {

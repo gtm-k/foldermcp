@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/foldermcp/foldermcp/internal/audit"
 	"github.com/foldermcp/foldermcp/internal/sandbox"
@@ -153,9 +154,16 @@ func (ms *MCPServer) makeToolHandler(t state.Tool) server.ToolHandlerFunc {
 }
 
 // logInvocation logs a tool call via the audit logger, if one is configured.
+// Parameters are sanitized before logging to prevent secret leakage.
 func (ms *MCPServer) logInvocation(toolName, params, resultStatus string) {
 	if ms.logger != nil {
-		ms.logger.Log(toolName, "invoke", params, "", resultStatus)
+		sanitizedParams := params
+		if ms.sanitizer != nil {
+			sanitizedParams = ms.sanitizer.SanitizeParams(params)
+		}
+		if err := ms.logger.Log(toolName, "invoke", sanitizedParams, "", resultStatus); err != nil {
+			fmt.Fprintf(os.Stderr, "audit log error: %v\n", err)
+		}
 	}
 }
 

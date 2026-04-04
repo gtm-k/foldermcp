@@ -715,9 +715,9 @@ func TestAuditLoggerIntegration_WriteAndVerify(t *testing.T) {
 	}
 
 	// Log several invocations.
-	logger.Log("add", "invoke", `{"x":1,"y":2}`, "test-caller", "success")
-	logger.Log("multiply", "invoke", `{"a":3,"b":4}`, "test-caller", "success")
-	logger.Log("fail_tool", "invoke", `{"msg":"bad"}`, "test-caller", "error")
+	_ = logger.Log("add", "invoke", `{"x":1,"y":2}`, "test-caller", "success")
+	_ = logger.Log("multiply", "invoke", `{"a":3,"b":4}`, "test-caller", "success")
+	_ = logger.Log("fail_tool", "invoke", `{"msg":"bad"}`, "test-caller", "error")
 
 	if err := logger.Close(); err != nil {
 		t.Fatalf("close logger: %v", err)
@@ -790,7 +790,7 @@ func TestAuditLoggerIntegration_ConcurrentWrites(t *testing.T) {
 	done := make(chan bool, 100)
 	for i := 0; i < 100; i++ {
 		go func(idx int) {
-			logger.Log(
+			_ = logger.Log(
 				fmt.Sprintf("tool_%d", idx),
 				"invoke",
 				fmt.Sprintf(`{"i":%d}`, idx),

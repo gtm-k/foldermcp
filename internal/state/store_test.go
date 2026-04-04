@@ -177,6 +177,16 @@ func TestStore_UpdateToolState(t *testing.T) {
 	if got.State != "enabled" {
 		t.Errorf("State after update = %q, want %q", got.State, "enabled")
 	}
+
+	// Invalid state should return error
+	if err := store.UpdateToolState("calculator", "bogus"); err == nil {
+		t.Error("expected error for invalid tool state, got nil")
+	}
+
+	// Non-existent tool should return error
+	if err := store.UpdateToolState("nonexistent", "enabled"); err == nil {
+		t.Error("expected error for nonexistent tool, got nil")
+	}
 }
 
 func TestStore_UpdateDepState(t *testing.T) {
@@ -208,6 +218,16 @@ func TestStore_UpdateDepState(t *testing.T) {
 	got, _ = store.GetTool("fetcher")
 	if got.DepState != "resolved" {
 		t.Errorf("DepState after update = %q, want %q", got.DepState, "resolved")
+	}
+
+	// Invalid dep state should return error
+	if err := store.UpdateDepState("fetcher", "bogus"); err == nil {
+		t.Error("expected error for invalid dep state, got nil")
+	}
+
+	// Non-existent tool should return error
+	if err := store.UpdateDepState("nonexistent", "resolved"); err == nil {
+		t.Error("expected error for nonexistent tool, got nil")
 	}
 }
 

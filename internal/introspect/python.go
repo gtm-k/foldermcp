@@ -1,11 +1,14 @@
 package introspect
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/foldermcp/foldermcp/internal/pythonrt"
 )
 
 // PythonIntrospector extracts tool metadata from Python source files
@@ -126,6 +129,9 @@ def extract_tools(filepath):
         else:
             description = 'Tool: ' + node.name
 
+        # Detect async functions
+        is_async = isinstance(node, ast.AsyncFunctionDef)
+
         # Determine risk: decorator kwarg > default
         risk = dec_info.get('risk', 'read_only')
 
@@ -161,6 +167,7 @@ def extract_tools(filepath):
             'input_schema': json.dumps(schema),
             'risk': risk,
             'language': 'python',
+            'is_async': is_async,
         })
     print(json.dumps(tools))
 
@@ -190,22 +197,9 @@ def extract_deps(filepath):
 extract_deps(sys.argv[1])
 `
 
-// findPython locates a usable Python interpreter. It tries python3 first,
-// then python, verifying the binary actually works (on Windows, python3 may
-// be a Microsoft Store shim that does not execute).
+// findPython delegates to the shared pythonrt package.
 func findPython() (string, error) {
-	for _, name := range []string{"python3", "python"} {
-		path, err := exec.LookPath(name)
-		if err != nil {
-			continue
-		}
-		// Verify the binary actually runs (avoids Windows App Alias shims).
-		cmd := exec.Command(path, "--version")
-		if err := cmd.Run(); err == nil {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("neither python3 nor python found in PATH")
+	return pythonrt.FindPython()
 }
 
 // CanHandle returns true for files with a .py extension.
@@ -220,11 +214,12 @@ type extractToolResult struct {
 	InputSchema string `json:"input_schema"`
 	Risk        string `json:"risk"`
 	Language    string `json:"language"`
+	IsAsync     bool   `json:"is_async"`
 }
 
 // ExtractTools runs the Python AST parsing script on the given file and
 // returns the discovered tool metadata.
-func (p *PythonIntrospector) ExtractTools(filePath string) ([]ToolMetadata, error) {
+func (p *PythonIntrospector) ExtractTools(ctx context.Context, filePath string) ([]ToolMetadata, error) {
 	pythonBin, err := findPython()
 	if err != nil {
 		return nil, err
@@ -235,7 +230,7 @@ func (p *PythonIntrospector) ExtractTools(filePath string) ([]ToolMetadata, erro
 		return nil, fmt.Errorf("resolve path: %w", err)
 	}
 
-	cmd := exec.Command(pythonBin, "-c", extractToolsScript, absPath)
+	cmd := exec.CommandContext(ctx, pythonBin, "-c", extractToolsScript, absPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("python extract tools failed: %w\noutput: %s", err, string(out))
@@ -248,12 +243,20 @@ func (p *PythonIntrospector) ExtractTools(filePath string) ([]ToolMetadata, erro
 
 	tools := make([]ToolMetadata, len(results))
 	for i, r := range results {
+		desc := r.Description
+		risk := r.Risk
+		if r.IsAsync {
+			desc = "(async) " + desc
+			if risk == "read_only" {
+				risk = "side_effects"
+			}
+		}
 		tools[i] = ToolMetadata{
 			Name:        r.Name,
 			SourceFile:  absPath,
-			Description: r.Description,
+			Description: desc,
 			InputSchema: r.InputSchema,
-			Risk:        r.Risk,
+			Risk:        risk,
 			Language:    r.Language,
 		}
 	}
@@ -262,7 +265,7 @@ func (p *PythonIntrospector) ExtractTools(filePath string) ([]ToolMetadata, erro
 
 // InferDependencies runs the Python AST import-extraction script and filters
 // out standard library modules, returning only third-party dependencies.
-func (p *PythonIntrospector) InferDependencies(filePath string) ([]Dependency, error) {
+func (p *PythonIntrospector) InferDependencies(ctx context.Context, filePath string) ([]Dependency, error) {
 	pythonBin, err := findPython()
 	if err != nil {
 		return nil, err
@@ -273,7 +276,7 @@ func (p *PythonIntrospector) InferDependencies(filePath string) ([]Dependency, e
 		return nil, fmt.Errorf("resolve path: %w", err)
 	}
 
-	cmd := exec.Command(pythonBin, "-c", extractDepsScript, absPath)
+	cmd := exec.CommandContext(ctx, pythonBin, "-c", extractDepsScript, absPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("python extract deps failed: %w\noutput: %s", err, string(out))

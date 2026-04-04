@@ -3,6 +3,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -36,7 +37,7 @@ func NewLogger(logPath string) (*Logger, error) {
 }
 
 // Log writes a single JSON-line audit entry with a UTC timestamp.
-func (l *Logger) Log(toolName, action, params, caller, resultStatus string) {
+func (l *Logger) Log(toolName, action, params, caller, resultStatus string) error {
 	entry := LogEntry{
 		Timestamp:    time.Now().UTC().Format(time.RFC3339),
 		ToolName:     toolName,
@@ -48,15 +49,18 @@ func (l *Logger) Log(toolName, action, params, caller, resultStatus string) {
 
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return // best-effort: don't crash on marshal failure
+		return fmt.Errorf("marshal audit entry: %w", err)
 	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	if l.file != nil {
-		_, _ = l.file.Write(append(data, '\n'))
+		if _, err := l.file.Write(append(data, '\n')); err != nil {
+			return fmt.Errorf("write audit entry: %w", err)
+		}
 	}
+	return nil
 }
 
 // Close closes the underlying log file.
