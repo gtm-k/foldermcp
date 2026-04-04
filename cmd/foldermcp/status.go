@@ -38,12 +38,17 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("list tools: %w", err)
 	}
 
-	if len(tools) == 0 {
-		fmt.Fprintln(os.Stderr, "No tools found. Run 'foldermcp init' first.")
+	resources, err := store.ListResources()
+	if err != nil {
+		return fmt.Errorf("list resources: %w", err)
+	}
+
+	if len(tools) == 0 && len(resources) == 0 {
+		fmt.Fprintln(os.Stderr, "No tools or resources found. Run 'foldermcp init' first.")
 		return nil
 	}
 
-	// Count by state.
+	// Count tools by state.
 	stateCounts := map[string]int{}
 	depStateCounts := map[string]int{}
 	for _, t := range tools {
@@ -51,7 +56,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		depStateCounts[t.DepState]++
 	}
 
-	_, _ = fmt.Fprintf(os.Stdout, "FolderMCP Status (%d tools)\n", len(tools))
+	// Count resources by state.
+	resCounts := map[string]int{}
+	for _, r := range resources {
+		resCounts[r.State]++
+	}
+
+	_, _ = fmt.Fprintf(os.Stdout, "FolderMCP Status (%d tools, %d resources)\n", len(tools), len(resources))
 	_, _ = fmt.Fprintln(os.Stdout, "")
 	_, _ = fmt.Fprintln(os.Stdout, "Tool States:")
 	printCount(stateCounts, "enabled")
@@ -64,6 +75,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	printCount(depStateCounts, "resolved")
 	printCount(depStateCounts, "resolving")
 	printCount(depStateCounts, "failed")
+
+	if len(resources) > 0 {
+		_, _ = fmt.Fprintln(os.Stdout, "")
+		_, _ = fmt.Fprintln(os.Stdout, "Resource States:")
+		printCount(resCounts, "enabled")
+		printCount(resCounts, "pending")
+		printCount(resCounts, "disabled")
+	}
 
 	return nil
 }

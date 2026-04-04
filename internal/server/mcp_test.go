@@ -38,7 +38,7 @@ func TestNewMCPServer_OnlyRegistersEnabledTools(t *testing.T) {
 		},
 	}
 
-	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, &MCPServerConfig{})
+	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, nil, &MCPServerConfig{})
 	if err != nil {
 		t.Fatalf("NewMCPServer: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestNewMCPServer_RegistersRequiresConfirmation(t *testing.T) {
 		},
 	}
 
-	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, &MCPServerConfig{})
+	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, nil, &MCPServerConfig{})
 	if err != nil {
 		t.Fatalf("NewMCPServer: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestNewMCPServer_NilConfig(t *testing.T) {
 	}
 
 	// Passing nil config should not panic — it should use defaults.
-	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, nil)
+	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewMCPServer with nil config: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestNewMCPServer_NilConfig(t *testing.T) {
 }
 
 func TestNewMCPServer_EmptyTools(t *testing.T) {
-	srv, err := NewMCPServer("test-server", "0.0.1", nil, nil, &MCPServerConfig{})
+	srv, err := NewMCPServer("test-server", "0.0.1", nil, nil, nil, &MCPServerConfig{})
 	if err != nil {
 		t.Fatalf("NewMCPServer: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestNewMCPServer_ToolMapPopulated(t *testing.T) {
 		},
 	}
 
-	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, &MCPServerConfig{})
+	srv, err := NewMCPServer("test-server", "0.0.1", tools, nil, nil, &MCPServerConfig{})
 	if err != nil {
 		t.Fatalf("NewMCPServer: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestNewMCPServer_WithExecutor(t *testing.T) {
 	exec := sandbox.NewExecutor(sandbox.ExecutorConfig{TimeoutSeconds: 5})
 	san := sandbox.NewSanitizer(1024)
 
-	s, err := NewMCPServer("test", "0.1.0", tools, nil, &MCPServerConfig{
+	s, err := NewMCPServer("test", "0.1.0", tools, nil, nil, &MCPServerConfig{
 		Executor:  exec,
 		Sanitizer: san,
 	})
@@ -194,7 +194,7 @@ func TestNewMCPServer_DisabledToolsExcluded(t *testing.T) {
 		{Name: "c", State: "pending", DepState: "resolved", InputSchema: `{}`},
 		{Name: "d", State: "requires_confirmation", DepState: "resolved", InputSchema: `{}`},
 	}
-	s, _ := NewMCPServer("test", "0.1.0", tools, nil, nil)
+	s, _ := NewMCPServer("test", "0.1.0", tools, nil, nil, nil)
 	// Should have 2: enabled + requires_confirmation
 	if s.enabledToolCount != 2 {
 		t.Errorf("expected 2 enabled, got %d", s.enabledToolCount)

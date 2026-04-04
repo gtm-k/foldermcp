@@ -39,22 +39,58 @@ func runCatalog(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("list tools: %w", err)
 	}
 
-	if len(tools) == 0 {
-		fmt.Fprintln(os.Stderr, "No tools found. Run 'foldermcp init' first.")
+	resources, err := store.ListResources()
+	if err != nil {
+		return fmt.Errorf("list resources: %w", err)
+	}
+
+	if len(tools) == 0 && len(resources) == 0 {
+		fmt.Fprintln(os.Stderr, "No tools or resources found. Run 'foldermcp init' first.")
 		return nil
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "NAME\tSTATE\tRISK\tSOURCE\tDESCRIPTION"); err != nil {
+	if _, err := fmt.Fprintln(w, "NAME\tTYPE\tSTATE\tRISK/MIME\tSOURCE\tDESCRIPTION"); err != nil {
 		return fmt.Errorf("write header: %w", err)
 	}
 	for _, t := range tools {
 		desc := truncateString(t.Description, 50)
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", t.Name, t.State, t.Risk, t.SourceFile, desc); err != nil {
+		if _, err := fmt.Fprintf(w, "%s\ttool\t%s\t%s\t%s\t%s\n", t.Name, t.State, t.Risk, t.SourceFile, desc); err != nil {
 			return fmt.Errorf("write tool row: %w", err)
 		}
 	}
+	for _, r := range resources {
+		sizeStr := formatSize(r.SizeBytes)
+		source := filepath.Dir(r.FilePath)
+		// Show relative source if possible.
+		if rel, err := filepath.Rel(dir, source); err == nil {
+			source = rel
+		}
+		if source == "." {
+			source = "./"
+		} else {
+			source += "/"
+		}
+		if _, err := fmt.Fprintf(w, "%s\tresource\t%s\t%s\t%s\t%s\n", r.Name, r.State, r.MimeType, source, sizeStr); err != nil {
+			return fmt.Errorf("write resource row: %w", err)
+		}
+	}
 	return w.Flush()
+}
+
+func formatSize(bytes int64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+	)
+	switch {
+	case bytes >= mb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
 }
 
 func truncateString(s string, maxLen int) string {

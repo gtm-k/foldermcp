@@ -63,15 +63,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("list tools: %w", err)
 	}
 
-	// Count enabled tools.
+	resources, err := store.ListResources()
+	if err != nil {
+		return fmt.Errorf("list resources: %w", err)
+	}
+
+	// Count enabled tools and resources.
 	enabledCount := 0
 	for _, t := range tools {
 		if t.State == "enabled" || t.State == "requires_confirmation" {
 			enabledCount++
 		}
 	}
-	if enabledCount == 0 {
-		return fmt.Errorf("no enabled tools found; run 'foldermcp review' to approve tools")
+	enabledResCount := 0
+	for _, r := range resources {
+		if r.State == "enabled" {
+			enabledResCount++
+		}
+	}
+	if enabledCount == 0 && enabledResCount == 0 {
+		return fmt.Errorf("no enabled tools or resources found; run 'foldermcp review' to approve tools")
 	}
 
 	// Create sandbox executor.
@@ -92,7 +103,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer func() { _ = logger.Close() }()
 
 	// Create MCP server.
-	mcpServer, err := server.NewMCPServer("foldermcp", "0.1.0", tools, store, &server.MCPServerConfig{
+	mcpServer, err := server.NewMCPServer("foldermcp", "0.1.0", tools, resources, store, &server.MCPServerConfig{
 		Executor:  executor,
 		Sanitizer: sanitizer,
 		Logger:    logger,
@@ -103,7 +114,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print status to stderr (stdout is reserved for MCP protocol).
-	fmt.Fprintf(os.Stderr, "FolderMCP server starting (mode=%s, tools=%d)\n", mode, enabledCount)
+	fmt.Fprintf(os.Stderr, "FolderMCP server starting (mode=%s, tools=%d, resources=%d)\n", mode, enabledCount, enabledResCount)
 	if cfg.ToolRouting.MaxToolsPerContext > 0 {
 		fmt.Fprintf(os.Stderr, "Max tools per context: %d\n", cfg.ToolRouting.MaxToolsPerContext)
 	}

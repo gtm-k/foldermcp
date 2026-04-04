@@ -71,14 +71,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	// Scan directory.
+	// Scan directory for tools.
 	start := time.Now()
 	registry := introspect.NewRegistry()
 	tools, err := registry.ScanDirectory(context.Background(), absDir, cfg.Scan.Include, cfg.Scan.Exclude)
 	if err != nil {
 		return fmt.Errorf("scan directory: %w", err)
 	}
-	elapsed := time.Since(start)
 
 	// Upsert each discovered tool into state store.
 	for _, tm := range tools {
@@ -116,11 +115,33 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Found %d tools in %dms\n", len(tools), elapsed.Milliseconds())
+	// Discover resources.
+	resourceIntrospector := &introspect.ResourceIntrospector{}
+	resources, err := resourceIntrospector.Discover(absDir, cfg.Scan.ResourceInclude, cfg.Scan.ResourceExclude)
+	if err != nil {
+		return fmt.Errorf("discover resources: %w", err)
+	}
+
+	// Upsert each discovered resource into state store.
+	for _, rm := range resources {
+		r := state.Resource{
+			Name:         rm.Name,
+			FilePath:     rm.FilePath,
+			MimeType:     rm.MimeType,
+			SizeBytes:    rm.SizeBytes,
+			ResourceType: rm.Type,
+		}
+		if err := store.UpsertResource(r); err != nil {
+			return fmt.Errorf("upsert resource %q: %w", rm.Name, err)
+		}
+	}
+
+	elapsed := time.Since(start)
+	fmt.Fprintf(os.Stderr, "Found %d tools and %d resources in %dms\n", len(tools), len(resources), elapsed.Milliseconds())
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Next steps:")
-	fmt.Fprintln(os.Stderr, "  foldermcp review    — approve or disable discovered tools")
-	fmt.Fprintln(os.Stderr, "  foldermcp catalog   — list all tools and their states")
+	fmt.Fprintln(os.Stderr, "  foldermcp review    — approve or disable discovered tools and resources")
+	fmt.Fprintln(os.Stderr, "  foldermcp catalog   — list all tools and resources")
 	fmt.Fprintln(os.Stderr, "  foldermcp serve     — start the MCP server")
 
 	return nil

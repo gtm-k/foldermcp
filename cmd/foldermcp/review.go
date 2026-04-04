@@ -78,27 +78,45 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("list tools: %w", err)
 	}
 
-	if len(tools) == 0 {
-		fmt.Fprintln(os.Stderr, "No tools found. Run 'foldermcp init' first.")
+	resources, err := store.ListResources()
+	if err != nil {
+		return fmt.Errorf("list resources: %w", err)
+	}
+
+	if len(tools) == 0 && len(resources) == 0 {
+		fmt.Fprintln(os.Stderr, "No tools or resources found. Run 'foldermcp init' first.")
 		return nil
 	}
 
-	// --approve-all: approve all pending tools non-interactively.
+	// Build a set of resource names for batch mode lookups.
+	resourceNames := make(map[string]bool)
+	for _, r := range resources {
+		resourceNames[r.Name] = true
+	}
+
+	// --approve-all: approve all pending tools and resources non-interactively.
 	if reviewApproveAll {
-		var pending []state.Tool
+		var pendingTools []state.Tool
 		for _, t := range tools {
 			if t.State == "pending" {
-				pending = append(pending, t)
+				pendingTools = append(pendingTools, t)
 			}
 		}
-		if len(pending) == 0 {
-			fmt.Fprintln(os.Stderr, "No pending tools to approve.")
+		var pendingResources []state.Resource
+		for _, r := range resources {
+			if r.State == "pending" {
+				pendingResources = append(pendingResources, r)
+			}
+		}
+
+		if len(pendingTools) == 0 && len(pendingResources) == 0 {
+			fmt.Fprintln(os.Stderr, "No pending tools or resources to approve.")
 			return nil
 		}
 
 		// Warn about destructive tools.
 		destructive := 0
-		for _, t := range pending {
+		for _, t := range pendingTools {
 			if t.Risk == "destructive" {
 				destructive++
 			}
@@ -107,7 +125,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "WARNING: %d tool(s) labeled 'destructive' will be approved\n", destructive)
 		}
 
-		for _, t := range pending {
+		for _, t := range pendingTools {
 			if err := store.UpdateToolState(t.Name, "enabled"); err != nil {
 				return fmt.Errorf("approve %q: %w", t.Name, err)
 			}
@@ -118,54 +136,79 @@ func runReview(cmd *cobra.Command, args []string) error {
 			tc.State = "enabled"
 			cfg.Tools[t.Name] = tc
 		}
-		fmt.Fprintf(os.Stderr, "Approved %d tools\n", len(pending))
+		for _, r := range pendingResources {
+			if err := store.UpdateResourceState(r.Name, "enabled"); err != nil {
+				return fmt.Errorf("approve resource %q: %w", r.Name, err)
+			}
+		}
+
+		fmt.Fprintf(os.Stderr, "Approved %d tools and %d resources\n", len(pendingTools), len(pendingResources))
 		return config.Save(dir, cfg)
 	}
 
 	// Batch mode: apply --approve, --disable, and --confirm flags directly.
 	if len(approveList) > 0 || len(disableList) > 0 || len(confirmList) > 0 {
-		return reviewBatch(store, cfg, dir, approveList, disableList, confirmList)
+		return reviewBatch(store, cfg, dir, approveList, disableList, confirmList, resourceNames)
 	}
 
 	// Interactive mode.
 	switch mode {
 	case "dev", "team":
-		return reviewDevMode(store, cfg, dir, tools)
+		return reviewDevMode(store, cfg, dir, tools, resources)
 	case "production":
-		return reviewProductionMode(store, cfg, dir, tools)
+		return reviewProductionMode(store, cfg, dir, tools, resources)
 	default:
 		return fmt.Errorf("unknown mode %q (use dev, team, or production)", mode)
 	}
 }
 
-func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, disable, confirm []string) error {
+func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, disable, confirm []string, resourceNames map[string]bool) error {
 	for _, name := range approve {
-		if err := store.UpdateToolState(name, "enabled"); err != nil {
-			return fmt.Errorf("approve %q: %w", name, err)
+		if resourceNames[name] {
+			if err := store.UpdateResourceState(name, "enabled"); err != nil {
+				return fmt.Errorf("approve resource %q: %w", name, err)
+			}
+			fmt.Fprintf(os.Stderr, "Approved resource: %s\n", name)
+		} else {
+			if err := store.UpdateToolState(name, "enabled"); err != nil {
+				return fmt.Errorf("approve %q: %w", name, err)
+			}
+			if cfg.Tools == nil {
+				cfg.Tools = make(map[string]config.ToolConfig)
+			}
+			tc := cfg.Tools[name]
+			tc.State = "enabled"
+			cfg.Tools[name] = tc
+			fmt.Fprintf(os.Stderr, "Approved: %s\n", name)
 		}
-		if cfg.Tools == nil {
-			cfg.Tools = make(map[string]config.ToolConfig)
-		}
-		tc := cfg.Tools[name]
-		tc.State = "enabled"
-		cfg.Tools[name] = tc
-		fmt.Fprintf(os.Stderr, "Approved: %s\n", name)
 	}
 
 	for _, name := range disable {
-		if err := store.UpdateToolState(name, "disabled"); err != nil {
-			return fmt.Errorf("disable %q: %w", name, err)
+		if resourceNames[name] {
+			if err := store.UpdateResourceState(name, "disabled"); err != nil {
+				return fmt.Errorf("disable resource %q: %w", name, err)
+			}
+			fmt.Fprintf(os.Stderr, "Disabled resource: %s\n", name)
+		} else {
+			if err := store.UpdateToolState(name, "disabled"); err != nil {
+				return fmt.Errorf("disable %q: %w", name, err)
+			}
+			if cfg.Tools == nil {
+				cfg.Tools = make(map[string]config.ToolConfig)
+			}
+			tc := cfg.Tools[name]
+			tc.State = "disabled"
+			cfg.Tools[name] = tc
+			fmt.Fprintf(os.Stderr, "Disabled: %s\n", name)
 		}
-		if cfg.Tools == nil {
-			cfg.Tools = make(map[string]config.ToolConfig)
-		}
-		tc := cfg.Tools[name]
-		tc.State = "disabled"
-		cfg.Tools[name] = tc
-		fmt.Fprintf(os.Stderr, "Disabled: %s\n", name)
 	}
 
 	for _, name := range confirm {
+		// Resources don't support requires_confirmation — only tools.
+		if resourceNames[name] {
+			fmt.Fprintf(os.Stderr, "warning: resources do not support requires_confirmation, skipping %s\n", name)
+			continue
+		}
 		if err := store.UpdateToolState(name, "requires_confirmation"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", name, err)
 		} else {
@@ -182,17 +225,23 @@ func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, di
 	return config.Save(dir, cfg)
 }
 
-func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []state.Tool) error {
+func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []state.Tool, resources []state.Resource) error {
 	// Count pending tools.
-	var pending []state.Tool
+	var pendingTools []state.Tool
 	for _, t := range tools {
 		if t.State == "pending" {
-			pending = append(pending, t)
+			pendingTools = append(pendingTools, t)
+		}
+	}
+	var pendingResources []state.Resource
+	for _, r := range resources {
+		if r.State == "pending" {
+			pendingResources = append(pendingResources, r)
 		}
 	}
 
-	if len(pending) == 0 {
-		fmt.Fprintln(os.Stderr, "No pending tools to review.")
+	if len(pendingTools) == 0 && len(pendingResources) == 0 {
+		fmt.Fprintln(os.Stderr, "No pending tools or resources to review.")
 		return nil
 	}
 
@@ -200,7 +249,7 @@ func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []s
 	readOnly := 0
 	sideEffects := 0
 	destructive := 0
-	for _, t := range pending {
+	for _, t := range pendingTools {
 		if t.Risk == "destructive" {
 			destructive++
 		}
@@ -213,13 +262,14 @@ func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []s
 	if destructive > 0 {
 		fmt.Fprintf(os.Stderr, "WARNING: %d tool(s) are labeled 'destructive'\n", destructive)
 	}
-	fmt.Fprintf(os.Stderr, "%d tools found. %d read-only, %d with side-effects. Approve all for local dev? [y/N] ", len(pending), readOnly, sideEffects)
+	fmt.Fprintf(os.Stderr, "%d tools found (%d read-only, %d with side-effects) and %d resources. Approve all for local dev? [y/N] ",
+		len(pendingTools), readOnly, sideEffects, len(pendingResources))
 	reader := bufio.NewReader(os.Stdin)
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))
 
 	if answer == "y" || answer == "yes" {
-		for _, t := range pending {
+		for _, t := range pendingTools {
 			if err := store.UpdateToolState(t.Name, "enabled"); err != nil {
 				return fmt.Errorf("approve %q: %w", t.Name, err)
 			}
@@ -230,7 +280,12 @@ func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []s
 			tc.State = "enabled"
 			cfg.Tools[t.Name] = tc
 		}
-		fmt.Fprintf(os.Stderr, "Approved %d tools.\n", len(pending))
+		for _, r := range pendingResources {
+			if err := store.UpdateResourceState(r.Name, "enabled"); err != nil {
+				return fmt.Errorf("approve resource %q: %w", r.Name, err)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Approved %d tools and %d resources.\n", len(pendingTools), len(pendingResources))
 		return config.Save(dir, cfg)
 	}
 
@@ -238,7 +293,7 @@ func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []s
 	return nil
 }
 
-func reviewProductionMode(store *state.Store, cfg *config.Config, dir string, tools []state.Tool) error {
+func reviewProductionMode(store *state.Store, cfg *config.Config, dir string, tools []state.Tool, resources []state.Resource) error {
 	reader := bufio.NewReader(os.Stdin)
 	changed := false
 
@@ -247,7 +302,7 @@ func reviewProductionMode(store *state.Store, cfg *config.Config, dir string, to
 			continue
 		}
 
-		fmt.Fprintf(os.Stderr, "\n--- %s ---\n", t.Name)
+		fmt.Fprintf(os.Stderr, "\n--- %s (tool) ---\n", t.Name)
 		fmt.Fprintf(os.Stderr, "  Source: %s\n", t.SourceFile)
 		fmt.Fprintf(os.Stderr, "  Risk:   %s\n", t.Risk)
 		fmt.Fprintf(os.Stderr, "  Desc:   %s\n", t.Description)
@@ -280,6 +335,40 @@ func reviewProductionMode(store *state.Store, cfg *config.Config, dir string, to
 		tc := cfg.Tools[t.Name]
 		tc.State = newState
 		cfg.Tools[t.Name] = tc
+		changed = true
+		fmt.Fprintf(os.Stderr, "  -> %s\n", newState)
+	}
+
+	for _, r := range resources {
+		if r.State != "pending" {
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "\n--- %s (resource) ---\n", r.Name)
+		fmt.Fprintf(os.Stderr, "  Path: %s\n", r.FilePath)
+		fmt.Fprintf(os.Stderr, "  MIME: %s\n", r.MimeType)
+		fmt.Fprintf(os.Stderr, "  Size: %d bytes\n", r.SizeBytes)
+		fmt.Fprintf(os.Stderr, "  [e]nable / [d]isable / [s]kip: ")
+
+		answer, _ := reader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
+
+		var newState string
+		switch answer {
+		case "e", "enable":
+			newState = "enabled"
+		case "d", "disable":
+			newState = "disabled"
+		case "s", "skip", "":
+			continue
+		default:
+			fmt.Fprintf(os.Stderr, "  Unknown choice %q, skipping.\n", answer)
+			continue
+		}
+
+		if err := store.UpdateResourceState(r.Name, newState); err != nil {
+			return fmt.Errorf("update resource %q: %w", r.Name, err)
+		}
 		changed = true
 		fmt.Fprintf(os.Stderr, "  -> %s\n", newState)
 	}

@@ -22,8 +22,10 @@ type Config struct {
 
 // ScanConfig controls which files are included/excluded during scanning.
 type ScanConfig struct {
-	Include []string `yaml:"include"`
-	Exclude []string `yaml:"exclude"`
+	Include         []string `yaml:"include"`
+	Exclude         []string `yaml:"exclude"`
+	ResourceInclude []string `yaml:"resource_include"`
+	ResourceExclude []string `yaml:"resource_exclude"`
 }
 
 // ToolConfig describes a single tool's configuration.

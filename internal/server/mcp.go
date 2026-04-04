@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/foldermcp/foldermcp/internal/audit"
 	"github.com/foldermcp/foldermcp/internal/sandbox"
@@ -23,9 +25,10 @@ type MCPServer struct {
 	executor         *sandbox.Executor
 	sanitizer        *sandbox.Sanitizer
 	logger           *audit.Logger
-	httpServer       *http.Server
-	transport        string // "stdio" or "http"
-	enabledToolCount int
+	httpServer           *http.Server
+	transport            string // "stdio" or "http"
+	enabledToolCount     int
+	enabledResourceCount int
 }
 
 // MCPServerConfig holds optional dependencies for the MCP server.
@@ -40,14 +43,30 @@ type MCPServerConfig struct {
 // NewMCPServer creates an MCP server, registering only tools whose State is
 // "enabled" or "requires_confirmation". Tools with State "disabled" or
 // "pending" are skipped entirely and will not appear in tools/list.
+// Resources with State "enabled" are registered as MCP resources.
 // The store parameter may be nil (e.g. in tests); when non-nil, tool state
 // is re-read from the store on each invocation for live updates.
-func NewMCPServer(name, version string, tools []state.Tool, store *state.Store, cfg *MCPServerConfig) (*MCPServer, error) {
+func NewMCPServer(name, version string, tools []state.Tool, resources []state.Resource, store *state.Store, cfg *MCPServerConfig) (*MCPServer, error) {
 	if cfg == nil {
 		cfg = &MCPServerConfig{}
 	}
 
-	mcpSrv := server.NewMCPServer(name, version, server.WithToolCapabilities(true))
+	// Enable resource capabilities if there are any enabled resources.
+	hasResources := false
+	for _, r := range resources {
+		if r.State == "enabled" {
+			hasResources = true
+			break
+		}
+	}
+
+	var opts []server.ServerOption
+	opts = append(opts, server.WithToolCapabilities(true))
+	if hasResources {
+		opts = append(opts, server.WithResourceCapabilities(false, false))
+	}
+
+	mcpSrv := server.NewMCPServer(name, version, opts...)
 
 	transport := cfg.Transport
 	if transport == "" {
@@ -86,7 +105,78 @@ func NewMCPServer(name, version string, tools []state.Tool, store *state.Store, 
 		mcpSrv.AddTool(mcpTool, ms.makeToolHandler(toolCopy))
 	}
 
+	// Register enabled resources.
+	for _, r := range resources {
+		if r.State != "enabled" {
+			continue
+		}
+
+		uri := "file://" + strings.ReplaceAll(r.FilePath, "\\", "/")
+		mcpResource := mcp.NewResource(
+			uri,
+			r.Name,
+			mcp.WithResourceDescription(fmt.Sprintf("%s (%s, %d bytes)", r.ResourceType, r.MimeType, r.SizeBytes)),
+			mcp.WithMIMEType(r.MimeType),
+		)
+
+		resCopy := r
+		mcpSrv.AddResource(mcpResource, ms.makeResourceHandler(resCopy))
+		ms.enabledResourceCount++
+	}
+
 	return ms, nil
+}
+
+// makeResourceHandler returns a ResourceHandlerFunc that reads the file and
+// returns its content as text (for text files) or base64 blob (for binary files).
+func (ms *MCPServer) makeResourceHandler(r state.Resource) server.ResourceHandlerFunc {
+	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		data, err := os.ReadFile(r.FilePath)
+		if err != nil {
+			return nil, fmt.Errorf("read resource %q: %w", r.Name, err)
+		}
+
+		uri := "file://" + strings.ReplaceAll(r.FilePath, "\\", "/")
+
+		if isTextMime(r.MimeType) {
+			return []mcp.ResourceContents{
+				mcp.TextResourceContents{
+					URI:      uri,
+					MIMEType: r.MimeType,
+					Text:     string(data),
+				},
+			}, nil
+		}
+
+		// Binary content — return base64-encoded.
+		return []mcp.ResourceContents{
+			mcp.BlobResourceContents{
+				URI:      uri,
+				MIMEType: r.MimeType,
+				Blob:     base64.StdEncoding.EncodeToString(data),
+			},
+		}, nil
+	}
+}
+
+// isTextMime returns true if the MIME type represents text content.
+func isTextMime(mime string) bool {
+	textMimes := map[string]bool{
+		"text/plain":    true,
+		"text/markdown": true,
+		"text/csv":      true,
+		"text/yaml":     true,
+		"text/toml":     true,
+		"text/html":     true,
+		"image/svg+xml": true,
+		"application/json": true,
+	}
+	return textMimes[mime]
+}
+
+// EnabledResourceCount returns the number of resources registered in the MCP server.
+func (ms *MCPServer) EnabledResourceCount() int {
+	return ms.enabledResourceCount
 }
 
 // makeToolHandler returns a ToolHandlerFunc for the given tool. It checks
