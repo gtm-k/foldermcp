@@ -5,20 +5,21 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io)
 
-Turn any folder of scripts into a secure, plug-and-play AI tool server.
+**Turn any folder into a secure MCP tool server.**
 
 FolderMCP scans directories containing Python, TypeScript/JavaScript, OpenAPI specs,
-shell scripts, and documents (PDFs, images, CSVs) then serves them as
+shell scripts, and documents (PDFs, images, CSVs, Markdown), then serves them as
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io) tools and resources.
-It handles discovery, introspection, dependency management, sandboxed execution,
-and protocol translation automatically.
+It handles discovery, introspection, dependency management, sandboxed execution, and
+protocol translation automatically -- no SDK, no wrapper code, no manifest to maintain.
 
 ## Why FolderMCP?
 
-- **Zero boilerplate.** Drop a Python, TypeScript, OpenAPI, or shell script into a folder and it becomes an MCP tool. PDFs and images become MCP resources. No SDK, no wrapper code, no manifest to maintain.
-- **Secure by default.** Every tool runs inside a sandbox with deny-by-default permissions. Risk levels and human-in-the-loop approval are built in.
-- **One command to connect.** `foldermcp connect claude-desktop` wires your tools into Claude Desktop (or any MCP-compatible client) in seconds.
-- **Production-ready workflow.** Three review modes (dev, team, production), audit logging, and dependency isolation let you go from prototype to deployment safely.
+- **Zero boilerplate for all languages.** Drop a Python function, TypeScript export, OpenAPI spec, or shell script into a folder and it becomes an MCP tool. PDFs, images, and CSVs become MCP resources. No SDK integration required.
+- **Secure by default.** Every tool starts in a `pending` state with deny-by-default permissions. Execution is sandboxed with configurable timeouts, output limits, and secret redaction.
+- **NAS and shared drive compatible.** Works on SMB, NFS, Azure Files, and cloud-mounted storage. Auto-detects network filesystems and splits shared config from local state.
+- **One command to connect.** `foldermcp connect <client>` wires your tools into Claude Desktop, Claude Code, Cursor, VS Code, or Windsurf in seconds.
+- **Production-ready workflow.** Three review modes (dev, team, production), structured audit logging, Docker/Cloud Run deployment, and health/metrics endpoints.
 
 ## Quick Start
 
@@ -26,97 +27,124 @@ and protocol translation automatically.
 # 1. Install
 go install github.com/foldermcp/foldermcp/cmd/foldermcp@latest
 
-# 2. Initialize a workspace
+# 2. Initialize
 foldermcp init ./my-tools
 
-# 3. Review and approve discovered tools
-cd my-tools
-foldermcp review
+# 3. Review & approve
+foldermcp review --approve-all
 
-# 4. Connect to Claude Desktop
+# 4. Connect to your AI client
 foldermcp connect claude-desktop
 
-# 5. Start the MCP server
+# 5. Start serving
 foldermcp serve
 ```
 
-See [examples/python-quickstart](examples/python-quickstart/) for a working
-example with several sample tools.
+## Supported Formats
+
+| Format | Extensions | What's Discovered | Example |
+|--------|-----------|-------------------|---------|
+| Python | `.py` | Functions with type hints | `def query(sql: str) -> str` |
+| TypeScript/JS | `.ts`, `.js`, `.mjs`, `.cjs` | Exported functions | `export function analyze(data: string)` |
+| OpenAPI | `.yaml`, `.json` | API operations | GET/POST/DELETE endpoints |
+| Shell | `.sh`, `.bash` | Script wrappers | `./deploy.sh` |
+| Documents | `.pdf`, `.md`, `.txt`, `.csv` | MCP Resources | Context docs for AI agents |
+| Images | `.png`, `.jpg`, `.svg` | MCP Resources | Diagrams, screenshots |
 
 ## CLI Reference
 
-| Command | Description |
-|---------|-------------|
-| `foldermcp init [path]` | Initialize a directory as a FolderMCP workspace |
-| `foldermcp review` | Review and approve or disable discovered tools |
-| `foldermcp serve` | Start the MCP server on stdin/stdout |
-| `foldermcp connect <client>` | Configure a client to use this server |
-| `foldermcp catalog` | List all discovered tools in a table |
-| `foldermcp status` | Show summary of tool and dependency states |
-| `foldermcp test <tool-name>` | Test a tool by running it locally |
-| `foldermcp test --all` | Smoke-test all enabled tools |
-| `foldermcp test --force` | Bypass state check during testing |
-| `foldermcp review --approve-all` | Approve all pending tools |
-| `foldermcp review --confirm=<tools>` | Set tools to requires_confirmation |
-| `foldermcp doctor` | Check environment for common issues |
-| `foldermcp deploy <target>` | Generate deployment artifacts |
-| `foldermcp connect cursor` | Configure Cursor MCP client |
-| `foldermcp ui` | Open developer studio |
+| Command | Description | Key Flags |
+|---------|-------------|-----------|
+| `foldermcp init [path]` | Initialize a directory as a workspace | `--template` (python, openapi, shell) |
+| `foldermcp review` | Review and approve/disable discovered tools | `--approve-all`, `--confirm`, `--disable`, `--mode`, `--dry-run` |
+| `foldermcp serve` | Start the MCP server | `--transport` (stdio, http), `--mode`, `--port`, `--watch`, `--profile` |
+| `foldermcp connect <client>` | Configure a client (claude-desktop, claude-code, cursor, vscode, windsurf) | `--snippet`, `--mode` |
+| `foldermcp catalog` | List all discovered tools in a table | `--state`, `--risk`, `--type` |
+| `foldermcp status` | Show tool and dependency state summary | `--json` |
+| `foldermcp test [tool]` | Test a tool by running it locally | `--all`, `--force`, `--params` |
+| `foldermcp diff` | Show what would change on re-scan | `--json` |
+| `foldermcp doctor` | Check environment for issues | `--fix` |
+| `foldermcp deploy <target>` | Generate deployment artifacts (docker, cloudrun) | `--dry-run` |
+| `foldermcp export a2a` | Export A2A agent-card.json | `--name`, `--url`, `--version` |
+| `foldermcp logs` | View the audit log | `--follow`, `--json` |
+| `foldermcp ui` | Open Developer Studio dashboard | `--port` (default 3001) |
+| `foldermcp completion` | Generate shell completions (bash, zsh, fish, powershell) | |
 
-### Shell Completion
+All commands support the `--json` global flag for machine-readable output.
 
-FolderMCP supports shell completion for bash, zsh, fish, and PowerShell:
+## NAS / Shared Drive Support
 
-    foldermcp completion bash > /etc/bash_completion.d/foldermcp
-    foldermcp completion zsh > "${fpath[1]}/_foldermcp"
-    foldermcp completion fish > ~/.config/fish/completions/foldermcp.fish
-    foldermcp completion powershell | Out-String | Invoke-Expression
+FolderMCP is designed to work on network-attached storage out of the box:
 
-### HTTP Endpoints (Team/Production Mode)
+- **Supported filesystems:** SMB, NFS, Azure Files, cloud-mounted storage (Google Drive, OneDrive).
+- **Auto-detection:** Detects network filesystem type at runtime and adapts behavior accordingly.
+- **Split storage:** Shared configuration (`foldermcp.yaml`, tool metadata) lives on the NAS; local state (audit logs, caches) lives per-user on the local machine.
+- **Shared approvals:** Tool approval state is stored on the shared drive so the whole team sees the same review status.
+- **Watch mode:** `foldermcp serve --watch` uses polling-based file watching, which works reliably on network filesystems where inotify/FSEvents are unavailable.
 
-When running in team/production mode (HTTP transport):
-- `/healthz` — health check endpoint
-- `/readyz` — readiness check endpoint
-- `/metrics` — Prometheus-compatible metrics
+## HTTP Endpoints (Team/Production Mode)
 
-## Features
+When running with `--transport http` in team or production mode:
 
-- **Auto-discovery** -- Scans directories for Python, TypeScript/JavaScript, OpenAPI specs, and shell scripts. Extracts tool metadata from type hints, docstrings, JSDoc, and schemas. PDFs, images, CSVs, and Markdown are discovered as MCP resources.
-- **Pluggable introspectors** -- Python, TypeScript/JS, OpenAPI, and shell introspectors ship built-in. The plugin interface (`IntrospectorPlugin`) supports community-contributed languages.
-- **Risk classification** -- Each tool is auto-tagged as `read_only`, `side_effects`, `destructive`, or `network` based on function names and HTTP methods. High-risk tools can require human confirmation.
-- **Three review modes** -- `dev` (bulk approve), `team` (risk-based batching), and `production` (individual review per tool with audit trail).
-- **NAS/shared drive support** -- Works on SMB, NFS, Azure Files, and cloud-mounted storage. Splits shared config (NAS) from local state (per-user). Auto-detects network filesystems.
-- **Sandboxed execution** -- Tools run in isolated subprocesses with configurable timeouts, output limits, rate limiting, and path traversal protection.
-- **Secret management** -- Auto-loads `.env` files for tool execution. Secrets never touch shared storage. Output sanitization redacts AWS keys, GitHub tokens, API keys, and private keys.
-- **Audit logging** -- Every invocation is logged as structured JSON with rotation. Supports `foldermcp logs` and `--json` output for CI/CD.
-- **Dependency management** -- Detects and installs Python (via uv) and Node.js dependencies into isolated environments with lockfile support.
-- **Client integration** -- One-command setup for Claude Desktop, Claude Code, Cursor, VS Code, and Windsurf. Connection snippet generator for other clients.
-- **Developer Studio** -- Local web dashboard (`foldermcp ui`) with live tool catalog, audit log, and status monitoring.
-- **Deployment** -- Generate Docker, Cloud Run, and A2A agent-card.json artifacts with `--dry-run` preview.
-- **Watch mode** -- `foldermcp serve --watch` auto-reloads on file changes (polling-based, works on NAS).
-- **Configuration via YAML** -- All settings live in `foldermcp.yaml` with sensible defaults, schema versioning, and tool profiles.
+- `/healthz` -- health check endpoint
+- `/readyz` -- readiness check endpoint
+- `/metrics` -- Prometheus-compatible metrics
+
+Supports API key authentication and self-signed TLS certificate generation.
+
+## Developer Studio
+
+```bash
+foldermcp ui
+```
+
+Opens a local web dashboard at `localhost:3001` with:
+
+- Live tool catalog with state, risk level, and descriptions
+- Audit log viewer with filtering
+- Server status and health monitoring
 
 ## Configuration
 
-FolderMCP is configured through a `foldermcp.yaml` file in the workspace root.
-Run `foldermcp init` to generate one with defaults, or copy the
-[foldermcp.yaml.example](foldermcp.yaml.example) template.
+All settings live in `foldermcp.yaml` at the workspace root. Run `foldermcp init` to generate one with defaults.
 
-Key sections:
+```yaml
+version: 1
 
-- **scan** -- Include/exclude glob patterns for file discovery.
-- **tools** -- Per-tool state overrides, descriptions, and risk levels.
-- **dependencies** -- Python and Node.js packages to install.
-- **tool_routing** -- Controls how many tools are exposed per context and which routing strategy to use.
+scan:
+  include: ["*.py", "*.ts", "*.js", "*.yaml", "*.yml", "*.sh"]
+  exclude: ["tests/**", "node_modules/**", ".git/**"]
+
+tools:
+  # Per-tool overrides
+  # my_tool:
+  #   state: "enabled"
+  #   description: "Custom description"
+  #   risk: "high"
+
+dependencies:
+  python: []   # e.g., [requests, flask]
+  node: []     # e.g., [express, typescript]
+
+tool_routing:
+  max_tools_per_context: 20
+  strategy: "profile"
+  profiles:
+    # read_only: [query_db, list_files]
+    # admin: [delete_records, deploy_to_prod]
+```
 
 ## Security
 
-FolderMCP follows a deny-by-default security model. All tools start in a
-`pending` state and must be explicitly approved before they can be invoked.
-Execution is sandboxed, and all invocations are audit-logged.
+FolderMCP follows a deny-by-default security model:
 
-For details on reporting vulnerabilities and the full security model, see
-[SECURITY.md](SECURITY.md).
+- All tools start in `pending` state and must be explicitly approved before invocation.
+- Execution is sandboxed in isolated subprocesses with configurable timeouts and output limits.
+- Output sanitization automatically redacts AWS keys, GitHub tokens, API keys, and private keys.
+- Per-tool risk labeling: `read_only`, `side_effects`, `destructive`, `network`.
+- Structured audit logging with JSON rotation for every invocation.
+
+For details on reporting vulnerabilities and the full security model, see [SECURITY.md](SECURITY.md).
 
 ## Project Structure
 
@@ -128,7 +156,7 @@ internal/
   config/            YAML configuration with schema versioning
   deps/              Dependency manager (uv for Python, npm for JS)
   export/            A2A agent-card.json export
-  introspect/        Tool introspectors (Python, TypeScript/JS, OpenAPI, Shell, Resources)
+  introspect/        Tool introspectors (Python, TS/JS, OpenAPI, Shell, Resources)
   lifecycle/         State transition validation
   pythonrt/          Shared Python runtime detection
   sandbox/           Sandboxed executor with rate limiting and path guard
@@ -150,6 +178,8 @@ before submitting a pull request.
 3. Add tests for new functionality.
 4. Run `make test` and `make lint` before submitting.
 5. Open a pull request with a clear description of the change.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ## License
 
