@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gtm-k/foldermcp/internal/audit"
 	"github.com/gtm-k/foldermcp/internal/sandbox"
 	"github.com/gtm-k/foldermcp/internal/state"
+	"github.com/gtm-k/foldermcp/internal/workspace"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -131,6 +133,19 @@ func NewMCPServer(name, version string, tools []state.Tool, resources []state.Re
 // returns its content as text (for text files) or base64 blob (for binary files).
 func (ms *MCPServer) makeResourceHandler(r state.Resource) server.ResourceHandlerFunc {
 	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		// Validate resource path hasn't been swapped for a symlink (SEC-03).
+		resolved, err := filepath.EvalSymlinks(r.FilePath)
+		if err != nil {
+			return nil, fmt.Errorf("resource path validation failed: %w", err)
+		}
+		if resolved != r.FilePath {
+			origDir := filepath.Dir(r.FilePath)
+			resolvedDir := filepath.Dir(resolved)
+			if !strings.HasPrefix(resolvedDir, origDir) {
+				return nil, fmt.Errorf("resource path is a symlink outside the workspace")
+			}
+		}
+
 		data, err := os.ReadFile(r.FilePath)
 		if err != nil {
 			return nil, fmt.Errorf("read resource %q: %w", r.Name, err)
@@ -159,19 +174,22 @@ func (ms *MCPServer) makeResourceHandler(r state.Resource) server.ResourceHandle
 	}
 }
 
+// textMIMETypes is a package-level lookup for MIME types that represent text
+// content, avoiding per-call map allocation.
+var textMIMETypes = map[string]bool{
+	"text/plain":        true,
+	"text/markdown":     true,
+	"text/csv":          true,
+	"text/yaml":         true,
+	"text/toml":         true,
+	"text/html":         true,
+	"image/svg+xml":     true,
+	"application/json":  true,
+}
+
 // isTextMime returns true if the MIME type represents text content.
 func isTextMime(mime string) bool {
-	textMimes := map[string]bool{
-		"text/plain":    true,
-		"text/markdown": true,
-		"text/csv":      true,
-		"text/yaml":     true,
-		"text/toml":     true,
-		"text/html":     true,
-		"image/svg+xml": true,
-		"application/json": true,
-	}
-	return textMimes[mime]
+	return textMIMETypes[mime]
 }
 
 // EnabledResourceCount returns the number of resources registered in the MCP server.
@@ -217,6 +235,18 @@ func (ms *MCPServer) makeToolHandler(t state.Tool) server.ToolHandlerFunc {
 			return nil, &ToolError{
 				Code:    ErrToolDependencyError,
 				Message: fmt.Sprintf("tool %q dependency resolution failed", t.Name),
+			}
+		}
+
+		// 2b. Verify content hash — block execution if the source was modified
+		// after approval (SEC-01).
+		if t.ContentHash != "" {
+			currentHash, hashErr := workspace.HashFile(t.SourceFile)
+			if hashErr != nil {
+				return nil, &ToolError{Code: ErrToolExecutionFailed, Message: fmt.Sprintf("cannot verify tool integrity: %v", hashErr)}
+			}
+			if currentHash != t.ContentHash {
+				return nil, &ToolError{Code: ErrToolAuthDenied, Message: "tool source file was modified after approval; re-run 'foldermcp review' to re-approve"}
 			}
 		}
 

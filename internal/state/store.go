@@ -19,6 +19,7 @@ type Tool struct {
 	Risk        string
 	State       string
 	DepState    string
+	ContentHash string
 }
 
 // Resource represents a discovered non-code file tracked in the state store.
@@ -80,6 +81,7 @@ func (s *Store) migrate() error {
 		risk         TEXT NOT NULL DEFAULT '',
 		state        TEXT NOT NULL DEFAULT 'pending',
 		dep_state    TEXT NOT NULL DEFAULT 'resolved',
+		content_hash TEXT NOT NULL DEFAULT '',
 		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
@@ -102,10 +104,18 @@ func (s *Store) migrate() error {
 		result_status TEXT NOT NULL DEFAULT '',
 		timestamp     DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_tools_state ON tools(state);
+	CREATE INDEX IF NOT EXISTS idx_audit_tool_name ON audit_log(tool_name);
+	CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
 	`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("execute schema: %w", err)
 	}
+
+	// Add content_hash column to existing databases that lack it.
+	_, _ = s.db.Exec("ALTER TABLE tools ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
+
 	return nil
 }
 
@@ -114,8 +124,8 @@ func (s *Store) migrate() error {
 // are preserved so that operator overrides are not lost on re-scan.
 func (s *Store) UpsertTool(t Tool) error {
 	const query = `
-	INSERT INTO tools (name, source_file, description, input_schema, risk, state, dep_state)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO tools (name, source_file, description, input_schema, risk, state, dep_state, content_hash)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(name) DO UPDATE SET
 		source_file  = excluded.source_file,
 		description  = excluded.description,
@@ -131,7 +141,7 @@ func (s *Store) UpsertTool(t Tool) error {
 	if depState == "" {
 		depState = "resolved"
 	}
-	_, err := s.db.Exec(query, t.Name, t.SourceFile, t.Description, t.InputSchema, t.Risk, toolState, depState)
+	_, err := s.db.Exec(query, t.Name, t.SourceFile, t.Description, t.InputSchema, t.Risk, toolState, depState, t.ContentHash)
 	if err != nil {
 		return fmt.Errorf("upsert tool %q: %w", t.Name, err)
 	}
@@ -141,14 +151,14 @@ func (s *Store) UpsertTool(t Tool) error {
 // GetTool retrieves a single tool by name. Returns nil, nil if not found.
 func (s *Store) GetTool(name string) (*Tool, error) {
 	const query = `
-	SELECT name, source_file, description, input_schema, risk, state, dep_state
+	SELECT name, source_file, description, input_schema, risk, state, dep_state, content_hash
 	FROM tools
 	WHERE name = ?
 	`
 	var t Tool
 	err := s.db.QueryRow(query, name).Scan(
 		&t.Name, &t.SourceFile, &t.Description,
-		&t.InputSchema, &t.Risk, &t.State, &t.DepState,
+		&t.InputSchema, &t.Risk, &t.State, &t.DepState, &t.ContentHash,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -162,7 +172,7 @@ func (s *Store) GetTool(name string) (*Tool, error) {
 // ListTools returns all tools ordered by name.
 func (s *Store) ListTools() ([]Tool, error) {
 	const query = `
-	SELECT name, source_file, description, input_schema, risk, state, dep_state
+	SELECT name, source_file, description, input_schema, risk, state, dep_state, content_hash
 	FROM tools
 	ORDER BY name
 	`
@@ -177,7 +187,7 @@ func (s *Store) ListTools() ([]Tool, error) {
 		var t Tool
 		if err := rows.Scan(
 			&t.Name, &t.SourceFile, &t.Description,
-			&t.InputSchema, &t.Risk, &t.State, &t.DepState,
+			&t.InputSchema, &t.Risk, &t.State, &t.DepState, &t.ContentHash,
 		); err != nil {
 			return nil, fmt.Errorf("scan tool row: %w", err)
 		}
@@ -218,6 +228,19 @@ func (s *Store) UpdateToolState(name, newState string) error {
 	res, err := s.db.Exec("UPDATE tools SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?", newState, name)
 	if err != nil {
 		return fmt.Errorf("update tool state: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("tool %q not found", name)
+	}
+	return nil
+}
+
+// UpdateContentHash sets the content_hash column for the named tool.
+func (s *Store) UpdateContentHash(name, hash string) error {
+	res, err := s.db.Exec("UPDATE tools SET content_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE name = ?", hash, name)
+	if err != nil {
+		return fmt.Errorf("update content hash: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -341,6 +364,52 @@ func (s *Store) UpdateResourceState(name, newState string) error {
 		return fmt.Errorf("resource %q not found", name)
 	}
 	return nil
+}
+
+// UpsertToolsBatch inserts or updates multiple tools inside a single
+// transaction, which is significantly faster than individual UpsertTool calls
+// when processing many tools (avoids per-row fsync overhead with WAL mode).
+func (s *Store) UpsertToolsBatch(tools []Tool) error {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO tools (name, source_file, description, input_schema, risk, state, dep_state, content_hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			source_file  = excluded.source_file,
+			description  = excluded.description,
+			input_schema = excluded.input_schema,
+			risk         = excluded.risk,
+			updated_at   = CURRENT_TIMESTAMP
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare upsert statement: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, t := range tools {
+		toolState := t.State
+		if toolState == "" {
+			toolState = "pending"
+		}
+		depState := t.DepState
+		if depState == "" {
+			depState = "resolved"
+		}
+		if _, err := stmt.Exec(t.Name, t.SourceFile, t.Description, t.InputSchema, t.Risk, toolState, depState, t.ContentHash); err != nil {
+			return fmt.Errorf("upsert tool %q: %w", t.Name, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // LogAudit appends a row to the audit_log table.

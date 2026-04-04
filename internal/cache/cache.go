@@ -90,9 +90,9 @@ func (c *Cache) copyFile(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("create cached file: %w", err)
 	}
-	defer func() { _ = out.Close() }()
 
 	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
 		return fmt.Errorf("copy data: %w", err)
 	}
 	return out.Close()

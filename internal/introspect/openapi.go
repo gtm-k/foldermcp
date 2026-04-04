@@ -102,7 +102,7 @@ func (o *OpenAPIIntrospector) ExtractTools(ctx context.Context, filePath string)
 }
 
 // InferDependencies returns nil -- OpenAPI specs have no code dependencies.
-func (o *OpenAPIIntrospector) InferDependencies(ctx context.Context, filePath string) ([]Dependency, error) {
+func (o *OpenAPIIntrospector) InferDependencies(_ context.Context, filePath string) ([]Dependency, error) {
 	return nil, nil
 }
 

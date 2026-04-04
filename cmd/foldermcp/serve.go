@@ -272,7 +272,7 @@ func serveHTTP(mcpServer *server.MCPServer, ws *workspace.Workspace, port int) e
 func loadOrGenerateAPIKey(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err == nil {
-		key := string(data)
+		key := strings.TrimSpace(string(data))
 		if len(key) > 0 {
 			return key, nil
 		}

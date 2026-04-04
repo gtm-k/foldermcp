@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
@@ -36,12 +37,27 @@ func (ms *MCPServer) ServeHTTP(addr string, cfg *HTTPConfig) error {
 
 	mux := http.NewServeMux()
 
-	// MCP endpoint — wrap with auth middleware if configured.
+	// Prometheus metrics stub endpoint handler (defined early, registered behind auth below).
+	totalTools := len(ms.tools)
+	enabledTools := ms.enabledToolCount
+	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = fmt.Fprintf(w, "# HELP foldermcp_tools_total Total number of tools\n")
+		_, _ = fmt.Fprintf(w, "# TYPE foldermcp_tools_total gauge\n")
+		_, _ = fmt.Fprintf(w, "foldermcp_tools_total %d\n", totalTools)
+		_, _ = fmt.Fprintf(w, "# HELP foldermcp_tools_enabled Number of enabled tools\n")
+		_, _ = fmt.Fprintf(w, "# TYPE foldermcp_tools_enabled gauge\n")
+		_, _ = fmt.Fprintf(w, "foldermcp_tools_enabled %d\n", enabledTools)
+	})
+
+	// MCP and metrics endpoints — wrap with auth middleware if configured (SEC-09).
 	if cfg.APIKey != "" {
 		auth := NewAPIKeyAuth(cfg.APIKey)
 		mux.Handle("/mcp", auth.Middleware(httpServer))
+		mux.Handle("/metrics", auth.Middleware(metricsHandler))
 	} else {
 		mux.Handle("/mcp", httpServer)
+		mux.Handle("/metrics", metricsHandler)
 	}
 
 	// Health endpoint — always returns OK if the process is running.
@@ -58,22 +74,13 @@ func (ms *MCPServer) ServeHTTP(addr string, cfg *HTTPConfig) error {
 		_, _ = fmt.Fprintf(w, `{"status":"ready","tools":%d}`, ms.enabledToolCount)
 	})
 
-	// Prometheus metrics stub endpoint.
-	totalTools := len(ms.tools)
-	enabledTools := ms.enabledToolCount
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		_, _ = fmt.Fprintf(w, "# HELP foldermcp_tools_total Total number of tools\n")
-		_, _ = fmt.Fprintf(w, "# TYPE foldermcp_tools_total gauge\n")
-		_, _ = fmt.Fprintf(w, "foldermcp_tools_total %d\n", totalTools)
-		_, _ = fmt.Fprintf(w, "# HELP foldermcp_tools_enabled Number of enabled tools\n")
-		_, _ = fmt.Fprintf(w, "# TYPE foldermcp_tools_enabled gauge\n")
-		_, _ = fmt.Fprintf(w, "foldermcp_tools_enabled %d\n", enabledTools)
-	})
-
 	customHTTP := &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	ms.httpServer = customHTTP
 

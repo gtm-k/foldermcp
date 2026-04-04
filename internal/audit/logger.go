@@ -87,8 +87,17 @@ func (l *Logger) rotateLocked() error {
 	_ = l.file.Close()
 	backupPath := l.path + ".1"
 	_ = os.Remove(backupPath)
-	_ = os.Rename(l.path, backupPath)
-	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err := os.Rename(l.path, backupPath); err != nil {
+		// Rename failed — try to reopen the original file and continue logging.
+		f, reopenErr := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if reopenErr != nil {
+			l.file = nil
+			return fmt.Errorf("rotate rename failed: %w; reopen also failed: %v", err, reopenErr)
+		}
+		l.file = f
+		return nil
+	}
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		l.file = nil
 		return err

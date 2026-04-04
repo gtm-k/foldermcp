@@ -1,6 +1,7 @@
 package introspect
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -199,6 +200,133 @@ def extract_tools(filepath):
 extract_tools(sys.argv[1])
 `
 
+// extractToolsBatchScript reads file paths from stdin (one per line) and outputs
+// a JSON array of arrays — one tool array per file.
+const extractToolsBatchScript = `
+import ast, json, sys
+
+type_map = {
+    'int': 'integer',
+    'float': 'number',
+    'str': 'string',
+    'bool': 'boolean',
+    'list': 'array',
+    'List': 'array',
+    'dict': 'object',
+    'Dict': 'object',
+}
+
+def get_type_name(annotation):
+    if annotation is None:
+        return 'string'
+    if isinstance(annotation, ast.Name):
+        return type_map.get(annotation.id, 'string')
+    if isinstance(annotation, ast.Attribute):
+        return type_map.get(annotation.attr, 'string')
+    if isinstance(annotation, ast.Subscript):
+        if isinstance(annotation.value, ast.Name):
+            return type_map.get(annotation.value.id, 'string')
+    return 'string'
+
+def get_decorator_info(node):
+    for dec in node.decorator_list:
+        dec_name = None
+        if isinstance(dec, ast.Call):
+            if isinstance(dec.func, ast.Name) and dec.func.id == 'tool':
+                dec_name = 'tool'
+            elif isinstance(dec.func, ast.Attribute) and dec.func.attr == 'tool':
+                dec_name = 'tool'
+        elif isinstance(dec, ast.Name) and dec.id == 'tool':
+            return {}
+        if dec_name == 'tool':
+            kwargs = {}
+            for kw in dec.keywords:
+                if kw.arg and isinstance(kw.value, ast.Constant):
+                    kwargs[kw.arg] = kw.value.value
+            return kwargs
+    return None
+
+def extract_tools(filepath):
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            source = f.read()
+        tree = ast.parse(source, filename=filepath)
+    except Exception:
+        return []
+    tools = []
+    for node in ast.iter_child_nodes(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith('_'):
+            continue
+        dec_info = get_decorator_info(node)
+        has_tool_decorator = dec_info is not None
+        if dec_info is None:
+            dec_info = {}
+        docstring = ast.get_docstring(node)
+        if 'description' in dec_info:
+            description = dec_info['description']
+        elif docstring:
+            description = docstring
+        else:
+            description = 'Tool: ' + node.name
+        is_async = isinstance(node, ast.AsyncFunctionDef)
+        risk = dec_info.get('risk', 'read_only')
+        if 'risk' not in dec_info:
+            name_lower = node.name.lower()
+            if any(w in name_lower for w in ['delete', 'remove', 'drop', 'destroy', 'purge', 'truncate']):
+                risk = "destructive"
+            elif any(w in name_lower for w in ['send', 'write', 'update', 'create', 'insert', 'post', 'put', 'push', 'deploy', 'execute', 'run', 'modify', 'set', 'notify']):
+                risk = "side_effects"
+            elif any(w in name_lower for w in ['fetch', 'download', 'upload', 'request', 'call', 'connect']):
+                risk = "network"
+        ret_type = ""
+        if node.returns:
+            ret_type = ast.dump(node.returns)
+            for py_type, label in [("int", "int"), ("float", "float"), ("str", "str"), ("bool", "bool"), ("list", "list"), ("dict", "dict")]:
+                if py_type in ret_type.lower():
+                    ret_type = label
+                    break
+        if ret_type:
+            description = f"{description} Returns: {ret_type}."
+        tool_name = dec_info.get('name', node.name)
+        args = node.args
+        properties = {}
+        required = []
+        num_args = len(args.args)
+        num_defaults = len(args.defaults)
+        first_default_idx = num_args - num_defaults
+        for i, arg in enumerate(args.args):
+            if arg.arg == 'self' or arg.arg == 'cls':
+                continue
+            json_type = get_type_name(arg.annotation)
+            properties[arg.arg] = {'type': json_type}
+            if i < first_default_idx:
+                required.append(arg.arg)
+        schema = {
+            'type': 'object',
+            'properties': properties,
+        }
+        if required:
+            schema['required'] = required
+        tools.append({
+            'name': tool_name,
+            'description': description,
+            'input_schema': json.dumps(schema),
+            'risk': risk,
+            'language': 'python',
+            'is_async': is_async,
+        })
+    return tools
+
+results = []
+for line in sys.stdin:
+    fp = line.strip()
+    if fp:
+        results.append(extract_tools(fp))
+print(json.dumps(results))
+`
+
 // extractDepsScript is the Python script that parses imports from a file's AST.
 const extractDepsScript = `
 import ast, json, sys
@@ -326,4 +454,72 @@ func (p *PythonIntrospector) InferDependencies(ctx context.Context, filePath str
 		})
 	}
 	return deps, nil
+}
+
+// ExtractToolsBatch runs a single Python subprocess to extract tool metadata
+// from multiple .py files at once, avoiding per-file subprocess overhead.
+// File paths are passed via stdin (one per line) and the script returns a JSON
+// array of arrays (one tool array per input file, in order).
+func (p *PythonIntrospector) ExtractToolsBatch(ctx context.Context, filePaths []string) ([][]ToolMetadata, error) {
+	if len(filePaths) == 0 {
+		return nil, nil
+	}
+
+	pythonBin, err := findPython()
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve all paths to absolute and prepare stdin payload.
+	absPaths := make([]string, len(filePaths))
+	for i, fp := range filePaths {
+		abs, err := filepath.Abs(fp)
+		if err != nil {
+			return nil, fmt.Errorf("resolve path %q: %w", fp, err)
+		}
+		absPaths[i] = abs
+	}
+
+	stdinData := strings.Join(absPaths, "\n") + "\n"
+
+	cmd := exec.CommandContext(ctx, pythonBin, "-c", extractToolsBatchScript)
+	cmd.Stdin = bytes.NewReader([]byte(stdinData))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("python batch extract tools failed: %w\noutput: %s", err, string(out))
+	}
+
+	var batchResults [][]extractToolResult
+	if err := json.Unmarshal(out, &batchResults); err != nil {
+		return nil, fmt.Errorf("parse python batch output: %w\nraw: %s", err, string(out))
+	}
+
+	if len(batchResults) != len(absPaths) {
+		return nil, fmt.Errorf("python batch returned %d results for %d files", len(batchResults), len(absPaths))
+	}
+
+	allTools := make([][]ToolMetadata, len(batchResults))
+	for fileIdx, results := range batchResults {
+		tools := make([]ToolMetadata, len(results))
+		for i, r := range results {
+			desc := r.Description
+			risk := r.Risk
+			if r.IsAsync {
+				desc = "(async) " + desc
+				if risk == "read_only" {
+					risk = "side_effects"
+				}
+			}
+			tools[i] = ToolMetadata{
+				Name:        r.Name,
+				SourceFile:  absPaths[fileIdx],
+				Description: desc,
+				InputSchema: r.InputSchema,
+				Risk:        risk,
+				Language:    r.Language,
+			}
+		}
+		allTools[fileIdx] = tools
+	}
+	return allTools, nil
 }

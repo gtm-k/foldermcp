@@ -40,6 +40,9 @@ func (r *Registry) Register(p IntrospectorPlugin) {
 // ScanDirectory walks dir, applies include/exclude glob patterns, and routes
 // each matching file to the first plugin that can handle it. Returns the
 // aggregated tool metadata from all matched files.
+//
+// Python files are collected during the walk and processed in a single batch
+// subprocess call (via ExtractToolsBatch) to avoid per-file process overhead.
 func (r *Registry) ScanDirectory(ctx context.Context, dir string, includes, excludes []string) ([]ToolMetadata, error) {
 	includeGlobs, err := compileGlobs(includes)
 	if err != nil {
@@ -52,7 +55,20 @@ func (r *Registry) ScanDirectory(ctx context.Context, dir string, includes, excl
 
 	var allTools []ToolMetadata
 
+	// Collect Python files for batch extraction instead of one subprocess each.
+	var pyIntrospector *PythonIntrospector
+	for _, p := range r.plugins {
+		if pi, ok := p.(*PythonIntrospector); ok {
+			pyIntrospector = pi
+			break
+		}
+	}
+	var pyFiles []string
+
 	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return nil
 		}
@@ -84,6 +100,13 @@ func (r *Registry) ScanDirectory(ctx context.Context, dir string, includes, excl
 		// Route to the first matching plugin.
 		for _, plugin := range r.plugins {
 			if plugin.CanHandle(path) {
+				// Defer Python files for batch processing.
+				if pyIntrospector != nil {
+					if _, ok := plugin.(*PythonIntrospector); ok {
+						pyFiles = append(pyFiles, path)
+						break
+					}
+				}
 				tools, extractErr := plugin.ExtractTools(ctx, path)
 				if extractErr != nil {
 					logWarning("extract tools from %s: %v", path, extractErr)
@@ -98,6 +121,27 @@ func (r *Registry) ScanDirectory(ctx context.Context, dir string, includes, excl
 
 	if walkErr != nil {
 		return nil, fmt.Errorf("walk directory %s: %w", dir, walkErr)
+	}
+
+	// Batch-extract tools from all collected Python files in a single subprocess.
+	if pyIntrospector != nil && len(pyFiles) > 0 {
+		batchTools, batchErr := pyIntrospector.ExtractToolsBatch(ctx, pyFiles)
+		if batchErr != nil {
+			logWarning("batch extract python tools: %v", batchErr)
+			// Fall back to per-file extraction.
+			for _, pyFile := range pyFiles {
+				tools, extractErr := pyIntrospector.ExtractTools(ctx, pyFile)
+				if extractErr != nil {
+					logWarning("extract tools from %s: %v", pyFile, extractErr)
+					continue
+				}
+				allTools = append(allTools, tools...)
+			}
+		} else {
+			for _, fileTools := range batchTools {
+				allTools = append(allTools, fileTools...)
+			}
+		}
 	}
 
 	// Deduplicate tool names by appending a numeric suffix.

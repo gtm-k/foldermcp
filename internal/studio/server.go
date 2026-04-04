@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -85,7 +86,20 @@ func (s *StudioServer) Handler() (http.Handler, error) {
 	mux.HandleFunc("/api/audit", s.handleAudit)
 	mux.HandleFunc("/api/status", s.handleStatus)
 
-	return mux, nil
+	return corsProtect(mux), nil
+}
+
+// corsProtect rejects cross-origin requests to prevent DNS rebinding and
+// CSRF attacks against the local Studio server (SEC-04).
+func corsProtect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			http.Error(w, "cross-origin requests not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Start opens the state database and starts the HTTP server. It blocks until
@@ -104,7 +118,10 @@ func (s *StudioServer) Start() error {
 
 // openDB opens the SQLite database from the state directory.
 func (s *StudioServer) openDB() error {
-	dbPath := s.stateDir + "/state.db"
+	if s.db != nil {
+		return nil // already open
+	}
+	dbPath := filepath.Join(s.stateDir, "state.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return fmt.Errorf("open sqlite: %w", err)
