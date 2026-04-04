@@ -60,16 +60,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # Install uv for fast Python dependency management.
 RUN pip install uv
 
+# Create non-root user.
+RUN groupadd -r foldermcp && useradd -r -g foldermcp foldermcp
+
 # Copy the built binary.
 COPY --from=builder /foldermcp /usr/local/bin/foldermcp
 
 # Copy workspace files.
 WORKDIR /workspace
-COPY . .
+COPY . /workspace/
+RUN chown -R foldermcp:foldermcp /workspace
+
+USER foldermcp
+
+HEALTHCHECK --interval=30s --timeout=5s CMD ["foldermcp", "doctor"]
+
+EXPOSE 3000
 
 # Initialize and serve.
 ENTRYPOINT ["foldermcp"]
 CMD ["serve", "--mode=production"]
+`
+
+	dockerignore := `.git
+.foldermcp
+__pycache__
+node_modules
+*.pyc
 `
 
 	dockerCompose := `version: "3.8"
@@ -85,6 +102,9 @@ services:
 	if dryRun {
 		fmt.Println("# --- Dockerfile ---")
 		fmt.Print(dockerfile)
+		fmt.Println()
+		fmt.Println("# --- .dockerignore ---")
+		fmt.Print(dockerignore)
 		fmt.Println()
 		fmt.Println("# --- docker-compose.yml ---")
 		fmt.Print(dockerCompose)
@@ -103,6 +123,12 @@ services:
 		return fmt.Errorf("write docker-compose.yml: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Wrote %s\n", composePath)
+
+	dockerignorePath := filepath.Join(dir, ".dockerignore")
+	if err := os.WriteFile(dockerignorePath, []byte(dockerignore), 0644); err != nil {
+		return fmt.Errorf("write .dockerignore: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Wrote %s\n", dockerignorePath)
 
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Build and run:")

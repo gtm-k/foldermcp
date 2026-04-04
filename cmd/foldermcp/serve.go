@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/foldermcp/foldermcp/internal/audit"
 	"github.com/foldermcp/foldermcp/internal/config"
@@ -88,10 +92,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer logger.Close()
 
 	// Create MCP server.
-	mcpServer, err := server.NewMCPServer("foldermcp", "0.1.0", tools, &server.MCPServerConfig{
+	mcpServer, err := server.NewMCPServer("foldermcp", "0.1.0", tools, store, &server.MCPServerConfig{
 		Executor:  executor,
 		Sanitizer: sanitizer,
 		Logger:    logger,
+		Transport: transport,
 	})
 	if err != nil {
 		return fmt.Errorf("create MCP server: %w", err)
@@ -109,6 +114,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if useHTTP {
 		return serveHTTP(mcpServer, stateDir, port)
 	}
+
+	// Set up signal handling for stdio mode.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintf(os.Stderr, "\nShutting down gracefully...\n")
+		os.Stdin.Close()
+	}()
 
 	return mcpServer.ServeStdio()
 }
@@ -143,11 +157,28 @@ func serveHTTP(mcpServer *server.MCPServer, stateDir string, port int) error {
 	fmt.Fprintf(os.Stderr, "TLS:     self-signed (cert=%s)\n", certFile)
 	fmt.Fprintf(os.Stderr, "-----------------------------\n\n")
 
-	return mcpServer.ServeHTTP(addr, &server.HTTPConfig{
-		APIKey:   apiKey,
-		CertFile: certFile,
-		KeyFile:  keyFile,
-	})
+	// Set up signal handling for graceful HTTP shutdown.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- mcpServer.ServeHTTP(addr, &server.HTTPConfig{
+			APIKey:   apiKey,
+			CertFile: certFile,
+			KeyFile:  keyFile,
+		})
+	}()
+
+	select {
+	case sig := <-sigCh:
+		fmt.Fprintf(os.Stderr, "\nReceived %v, shutting down gracefully...\n", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return mcpServer.ShutdownHTTP(ctx)
+	case err := <-errCh:
+		return err
+	}
 }
 
 // loadOrGenerateAPIKey reads an API key from path, or generates a new one

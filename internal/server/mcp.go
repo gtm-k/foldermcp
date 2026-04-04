@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/foldermcp/foldermcp/internal/audit"
@@ -18,9 +19,12 @@ import (
 type MCPServer struct {
 	server           *server.MCPServer
 	tools            map[string]state.Tool
+	store            *state.Store
 	executor         *sandbox.Executor
 	sanitizer        *sandbox.Sanitizer
 	logger           *audit.Logger
+	httpServer       *http.Server
+	transport        string // "stdio" or "http"
 	enabledToolCount int
 }
 
@@ -30,24 +34,34 @@ type MCPServerConfig struct {
 	Executor  *sandbox.Executor
 	Sanitizer *sandbox.Sanitizer
 	Logger    *audit.Logger
+	Transport string // "stdio" or "http"; used as caller identity in audit logs
 }
 
 // NewMCPServer creates an MCP server, registering only tools whose State is
 // "enabled" or "requires_confirmation". Tools with State "disabled" or
 // "pending" are skipped entirely and will not appear in tools/list.
-func NewMCPServer(name, version string, tools []state.Tool, cfg *MCPServerConfig) (*MCPServer, error) {
+// The store parameter may be nil (e.g. in tests); when non-nil, tool state
+// is re-read from the store on each invocation for live updates.
+func NewMCPServer(name, version string, tools []state.Tool, store *state.Store, cfg *MCPServerConfig) (*MCPServer, error) {
 	if cfg == nil {
 		cfg = &MCPServerConfig{}
 	}
 
 	mcpSrv := server.NewMCPServer(name, version, server.WithToolCapabilities(true))
 
+	transport := cfg.Transport
+	if transport == "" {
+		transport = "stdio"
+	}
+
 	ms := &MCPServer{
 		server:    mcpSrv,
 		tools:     make(map[string]state.Tool),
+		store:     store,
 		executor:  cfg.Executor,
 		sanitizer: cfg.Sanitizer,
 		logger:    cfg.Logger,
+		transport: transport,
 	}
 
 	for _, t := range tools {
@@ -77,8 +91,23 @@ func NewMCPServer(name, version string, tools []state.Tool, cfg *MCPServerConfig
 
 // makeToolHandler returns a ToolHandlerFunc for the given tool. It checks
 // state, dep_state, invokes execution, audits, and sanitizes output.
+// When a store is available, tool state is re-read on each invocation to
+// pick up live changes (e.g. a tool being disabled via CLI).
 func (ms *MCPServer) makeToolHandler(t state.Tool) server.ToolHandlerFunc {
+	toolName := t.Name
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Re-read current tool state from the store if available.
+		if ms.store != nil {
+			fresh, err := ms.store.GetTool(toolName)
+			if err != nil || fresh == nil {
+				return nil, &ToolError{
+					Code:    ErrToolAuthDenied,
+					Message: fmt.Sprintf("tool %q not found", toolName),
+				}
+			}
+			t = *fresh
+		}
+
 		// 1. Check tool state — if disabled at call time, deny.
 		if t.State == "disabled" {
 			return nil, &ToolError{
@@ -161,7 +190,7 @@ func (ms *MCPServer) logInvocation(toolName, params, resultStatus string) {
 		if ms.sanitizer != nil {
 			sanitizedParams = ms.sanitizer.SanitizeParams(params)
 		}
-		if err := ms.logger.Log(toolName, "invoke", sanitizedParams, "", resultStatus); err != nil {
+		if err := ms.logger.Log(toolName, "invoke", sanitizedParams, ms.transport, resultStatus); err != nil {
 			fmt.Fprintf(os.Stderr, "audit log error: %v\n", err)
 		}
 	}

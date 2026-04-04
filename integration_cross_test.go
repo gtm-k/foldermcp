@@ -408,7 +408,7 @@ func TestStateStoreToMCPServer_OnlyApprovedToolsRegistered(t *testing.T) {
 		},
 	}
 
-	srv, err := server.NewMCPServer("test-server", "0.0.1", tools, &server.MCPServerConfig{})
+	srv, err := server.NewMCPServer("test-server", "0.0.1", tools, nil, &server.MCPServerConfig{})
 	if err != nil {
 		t.Fatalf("NewMCPServer: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestStateStoreToMCPServer_FullCycleFromDB(t *testing.T) {
 	store.Close()
 
 	// Create MCP server from DB tools.
-	srv, err := server.NewMCPServer("test", "0.0.1", dbTools, &server.MCPServerConfig{})
+	srv, err := server.NewMCPServer("test", "0.0.1", dbTools, nil, &server.MCPServerConfig{})
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
@@ -1174,7 +1174,7 @@ def dangerous_tool(path: str) -> str:
 	store.Close()
 
 	// MCP Server.
-	srv, err := server.NewMCPServer("test", "0.0.1", dbTools, &server.MCPServerConfig{})
+	srv, err := server.NewMCPServer("test", "0.0.1", dbTools, nil, &server.MCPServerConfig{})
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
