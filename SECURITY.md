@@ -94,3 +94,13 @@ Each tool is assigned a risk level during introspection:
 
 High-risk tools can be configured to require human confirmation before each
 invocation.
+
+## API Key Management
+
+In team mode, FolderMCP generates an API key stored at `.foldermcp/api.key`.
+To rotate the key:
+1. Stop the server
+2. Delete `.foldermcp/api.key`
+3. Restart — a new key will be generated automatically
+
+Future versions will support key rotation without restart.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"os"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -13,14 +13,27 @@ import (
 // OpenAPIIntrospector extracts tool metadata from OpenAPI specification files.
 type OpenAPIIntrospector struct{}
 
-// CanHandle returns true for .yaml, .yml, .json files, excluding foldermcp.yaml.
+// CanHandle returns true for .yaml, .yml, .json files that appear to contain
+// an OpenAPI or Swagger specification. It excludes known non-OpenAPI files
+// and performs a quick content sniff on the first 512 bytes.
 func (o *OpenAPIIntrospector) CanHandle(filePath string) bool {
-	base := filepath.Base(filePath)
-	if base == "foldermcp.yaml" {
+	lower := strings.ToLower(filePath)
+	if strings.HasSuffix(lower, "foldermcp.yaml") || strings.HasSuffix(lower, "foldermcp.yml") {
 		return false
 	}
-	ext := strings.ToLower(filepath.Ext(filePath))
-	return ext == ".yaml" || ext == ".yml" || ext == ".json"
+	if strings.HasSuffix(lower, "package.json") || strings.HasSuffix(lower, "tsconfig.json") || strings.HasSuffix(lower, "docker-compose.yml") || strings.HasSuffix(lower, "docker-compose.yaml") {
+		return false
+	}
+	if !(strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".json")) {
+		return false
+	}
+	// Quick content sniff: check first 512 bytes for openapi/swagger key.
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return false
+	}
+	header := strings.ToLower(string(data[:min(len(data), 512)]))
+	return strings.Contains(header, "openapi") || strings.Contains(header, "swagger")
 }
 
 // ExtractTools parses an OpenAPI spec and returns tool metadata for each operation.

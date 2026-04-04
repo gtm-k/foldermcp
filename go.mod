@@ -3,6 +3,7 @@ module github.com/foldermcp/foldermcp
 go 1.25.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/getkin/kin-openapi v0.134.0
 	github.com/gobwas/glob v0.2.3
 	github.com/mark3labs/mcp-go v0.46.0

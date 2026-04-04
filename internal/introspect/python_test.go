@@ -57,7 +57,7 @@ func TestPythonIntrospector_ExtractTools(t *testing.T) {
 	if add.Name != "add_numbers" {
 		t.Errorf("expected name 'add_numbers', got %q", add.Name)
 	}
-	if add.Description != "Add two numbers together and return the result." {
+	if add.Description != "Add two numbers together and return the result. Returns: int." {
 		t.Errorf("unexpected description: %q", add.Description)
 	}
 	if add.Language != "python" {
@@ -91,7 +91,7 @@ func TestPythonIntrospector_ExtractTools(t *testing.T) {
 	if mul.Name != "multiply" {
 		t.Errorf("expected name 'multiply', got %q", mul.Name)
 	}
-	if mul.Description != "Multiply two floating point numbers." {
+	if mul.Description != "Multiply two floating point numbers. Returns: float." {
 		t.Errorf("unexpected description: %q", mul.Description)
 	}
 }
@@ -200,8 +200,8 @@ func TestPythonIntrospector_ToolDecorator(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool 'add' to be discovered")
 	}
-	if add.Description != "Add two numbers" {
-		t.Errorf("add description = %q, want %q", add.Description, "Add two numbers")
+	if add.Description != "Add two numbers Returns: int." {
+		t.Errorf("add description = %q, want %q", add.Description, "Add two numbers Returns: int.")
 	}
 	if add.Risk != "read_only" {
 		t.Errorf("add risk = %q, want %q", add.Risk, "read_only")
@@ -212,8 +212,8 @@ func TestPythonIntrospector_ToolDecorator(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool 'remove_record' (renamed from delete_record)")
 	}
-	if rm.Description != "Delete a record permanently" {
-		t.Errorf("remove_record description = %q, want %q", rm.Description, "Delete a record permanently")
+	if rm.Description != "Delete a record permanently Returns: bool." {
+		t.Errorf("remove_record description = %q, want %q", rm.Description, "Delete a record permanently Returns: bool.")
 	}
 	if rm.Risk != "destructive" {
 		t.Errorf("remove_record risk = %q, want %q", rm.Risk, "destructive")
@@ -233,7 +233,7 @@ func TestPythonIntrospector_ToolDecorator(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool 'plain_function' to be discovered")
 	}
-	if pf.Description != "A plain function without decorator should still be discovered." {
+	if pf.Description != "A plain function without decorator should still be discovered. Returns: int." {
 		t.Errorf("plain_function description = %q", pf.Description)
 	}
 	if pf.Risk != "read_only" {

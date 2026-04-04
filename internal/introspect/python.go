@@ -146,6 +146,20 @@ def extract_tools(filepath):
             elif any(w in name_lower for w in ['fetch', 'download', 'upload', 'request', 'call', 'connect']):
                 risk = "network"
 
+        # Extract return type annotation
+        ret_type = ""
+        if node.returns:
+            ret_type = ast.dump(node.returns)
+            # Simplify common types
+            for py_type, label in [("int", "int"), ("float", "float"), ("str", "str"), ("bool", "bool"), ("list", "list"), ("dict", "dict")]:
+                if py_type in ret_type.lower():
+                    ret_type = label
+                    break
+
+        # Append return type to description if available
+        if ret_type:
+            description = f"{description} Returns: {ret_type}."
+
         # Determine tool name: decorator kwarg > function name
         tool_name = dec_info.get('name', node.name)
 

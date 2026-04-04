@@ -3,6 +3,7 @@ package introspect
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -10,20 +11,52 @@ import (
 func TestOpenAPIIntrospector_CanHandle(t *testing.T) {
 	o := &OpenAPIIntrospector{}
 
+	// Create temp files with OpenAPI content for positive tests.
+	dir := t.TempDir()
+	openapiContent := []byte(`openapi: "3.0.0"
+info:
+  title: Test
+  version: "1.0.0"
+paths: {}
+`)
+	swaggerContent := []byte(`{"swagger": "2.0", "info": {"title": "Test", "version": "1.0"}}`)
+	nonOpenAPIYAML := []byte(`name: my-project
+version: 1.0.0
+`)
+	nonOpenAPIJSON := []byte(`{"name": "my-project", "version": "1.0.0"}`)
+
+	writeFile := func(name string, data []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	openapiYAML := writeFile("spec.yaml", openapiContent)
+	openapiYML := writeFile("spec.yml", openapiContent)
+	openapiJSON := writeFile("spec.json", swaggerContent)
+	plainYAML := writeFile("config.yaml", nonOpenAPIYAML)
+	plainJSON := writeFile("package.json", nonOpenAPIJSON)
+	tsconfigJSON := writeFile("tsconfig.json", nonOpenAPIJSON)
+	dockerYAML := writeFile("docker-compose.yml", nonOpenAPIYAML)
+	foldermcpYAML := writeFile("foldermcp.yaml", openapiContent)
+
 	tests := []struct {
 		name     string
 		filePath string
 		want     bool
 	}{
-		{"yaml file", "spec.yaml", true},
-		{"yml file", "spec.yml", true},
-		{"json file", "spec.json", true},
+		{"openapi yaml file", openapiYAML, true},
+		{"openapi yml file", openapiYML, true},
+		{"swagger json file", openapiJSON, true},
 		{"python file", "app.py", false},
 		{"go file", "main.go", false},
-		{"foldermcp.yaml excluded", "foldermcp.yaml", false},
-		{"foldermcp.yaml in subdir excluded", "/some/path/foldermcp.yaml", false},
-		{"yaml in path", "/api/openapi.yaml", true},
-		{"json in path", "/api/openapi.json", true},
+		{"foldermcp.yaml excluded", foldermcpYAML, false},
+		{"package.json excluded", plainJSON, false},
+		{"tsconfig.json excluded", tsconfigJSON, false},
+		{"docker-compose.yml excluded", dockerYAML, false},
+		{"non-openapi yaml", plainYAML, false},
 	}
 
 	for _, tt := range tests {

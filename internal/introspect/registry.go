@@ -100,13 +100,16 @@ func (r *Registry) ScanDirectory(ctx context.Context, dir string, includes, excl
 		return nil, fmt.Errorf("walk directory %s: %w", dir, walkErr)
 	}
 
-	// Warn about duplicate tool names.
-	seen := make(map[string]string) // name -> source file
-	for _, t := range allTools {
-		if prevFile, exists := seen[t.Name]; exists {
-			logWarning("duplicate tool name %q: %s overwrites %s", t.Name, t.SourceFile, prevFile)
+	// Deduplicate tool names by appending a numeric suffix.
+	seen := make(map[string]int)
+	for i, t := range allTools {
+		if count, exists := seen[t.Name]; exists {
+			logWarning("duplicate tool name %q from %s (also in previous file); renaming to %s_%d", t.Name, t.SourceFile, t.Name, count+1)
+			allTools[i].Name = fmt.Sprintf("%s_%d", t.Name, count+1)
+			seen[t.Name] = count + 1
+		} else {
+			seen[t.Name] = 1
 		}
-		seen[t.Name] = t.SourceFile
 	}
 
 	return allTools, nil

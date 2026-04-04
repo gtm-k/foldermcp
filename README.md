@@ -48,8 +48,14 @@ example with several sample tools.
 | `foldermcp catalog` | List all discovered tools in a table |
 | `foldermcp status` | Show summary of tool and dependency states |
 | `foldermcp test <tool-name>` | Test a tool by running it locally |
+| `foldermcp test --all` | Smoke-test all enabled tools |
+| `foldermcp test --force` | Bypass state check during testing |
+| `foldermcp review --approve-all` | Approve all pending tools |
+| `foldermcp review --confirm=<tools>` | Set tools to requires_confirmation |
 | `foldermcp doctor` | Check environment for common issues |
 | `foldermcp deploy <target>` | Generate deployment artifacts |
+| `foldermcp connect cursor` | Configure Cursor MCP client |
+| `foldermcp ui` | Open developer studio |
 
 ### Shell Completion
 
@@ -59,6 +65,13 @@ FolderMCP supports shell completion for bash, zsh, fish, and PowerShell:
     foldermcp completion zsh > "${fpath[1]}/_foldermcp"
     foldermcp completion fish > ~/.config/fish/completions/foldermcp.fish
     foldermcp completion powershell | Out-String | Invoke-Expression
+
+### HTTP Endpoints (Team/Production Mode)
+
+When running in team/production mode (HTTP transport):
+- `/healthz` — health check endpoint
+- `/readyz` — readiness check endpoint
+- `/metrics` — Prometheus-compatible metrics
 
 ## Features
 

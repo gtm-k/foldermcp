@@ -124,13 +124,15 @@ func (e *Executor) RunPython(ctx context.Context, code string, venvPath string, 
 // pythonFileScript is a static Python script that reads file path, function
 // name, and arguments from environment variables. This avoids string
 // interpolation of untrusted data into the script body.
-const pythonFileScript = `import importlib.util, json, sys, os
+const pythonFileScript = `import asyncio, importlib.util, json, sys, os
 spec = importlib.util.spec_from_file_location("_tool_module", os.environ["_FOLDERMCP_FILE"])
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 fn = getattr(mod, os.environ["_FOLDERMCP_FUNC"])
 args = json.loads(os.environ.get("_FOLDERMCP_ARGS", "{}"))
 result = fn(**args)
+if asyncio.iscoroutine(result):
+    result = asyncio.run(result)
 print("null" if result is None else json.dumps(result))
 `
 

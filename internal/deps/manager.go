@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 )
 
 // ImportedPackage represents a Python import discovered by introspection.
@@ -203,49 +205,28 @@ func parseRequirementsTxt(path string) ([]string, error) {
 	return packages, nil
 }
 
-// parsePyprojectToml does a lightweight parse of pyproject.toml to extract
-// the [project].dependencies list. This avoids pulling in a full TOML
-// parser dependency; it handles the common formatting patterns.
+// pyprojectToml represents the subset of pyproject.toml we care about.
+type pyprojectToml struct {
+	Project struct {
+		Dependencies []string `toml:"dependencies"`
+	} `toml:"project"`
+}
+
+// parsePyprojectToml parses a pyproject.toml using a proper TOML parser and
+// extracts the [project].dependencies list, stripping version specifiers to
+// return bare package names.
 func parsePyprojectToml(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
+	var pp pyprojectToml
+	if _, err := toml.DecodeFile(path, &pp); err != nil {
 		return nil, err
 	}
 
-	content := string(data)
-
-	// Find the dependencies array. We look for:
-	//   dependencies = [
-	//       "pkg>=1.0",
-	//       "other",
-	//   ]
-	// This handles both inline and multiline formats.
-	depsRe := regexp.MustCompile(`(?m)^dependencies\s*=\s*\[(.*?)\]`)
-	// Use (?s) mode for multiline content inside brackets.
-	depsReMulti := regexp.MustCompile(`(?s)dependencies\s*=\s*\[(.*?)\]`)
-
-	var depsBlock string
-	if m := depsRe.FindStringSubmatch(content); len(m) > 1 {
-		depsBlock = m[1]
-	} else if m := depsReMulti.FindStringSubmatch(content); len(m) > 1 {
-		depsBlock = m[1]
-	} else {
-		return nil, nil // No dependencies found.
-	}
-
-	// Extract quoted strings from the deps block.
-	quotedRe := regexp.MustCompile(`"([^"]+)"`)
-	matches := quotedRe.FindAllStringSubmatch(depsBlock, -1)
-
-	// Same regex for package name extraction.
+	// Same regex for package name extraction (strip version specifiers).
 	pkgNameRe := regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)`)
 
 	var packages []string
-	for _, m := range matches {
-		if len(m) < 2 {
-			continue
-		}
-		spec := strings.TrimSpace(m[1])
+	for _, spec := range pp.Project.Dependencies {
+		spec = strings.TrimSpace(spec)
 		if name := pkgNameRe.FindString(spec); name != "" {
 			packages = append(packages, name)
 		}
