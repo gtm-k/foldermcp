@@ -25,7 +25,10 @@ with discovered tools.`,
 	RunE: runInit,
 }
 
+var initTemplate string
+
 func init() {
+	initCmd.Flags().StringVar(&initTemplate, "template", "", "Scaffold an example project (python, openapi, shell)")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -38,6 +41,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
+	}
+
+	// Handle --template scaffolding before anything else.
+	if initTemplate != "" {
+		return scaffoldTemplate(absDir, initTemplate)
 	}
 
 	// Validate directory exists.
@@ -153,5 +161,199 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stderr, "  foldermcp catalog   — list all tools and resources")
 	fmt.Fprintln(os.Stderr, "  foldermcp serve     — start the MCP server")
 
+	return nil
+}
+
+// scaffoldTemplate creates example files for the given template type.
+func scaffoldTemplate(dir, template string) error {
+	switch template {
+	case "python":
+		return scaffoldPython(dir)
+	case "openapi":
+		return scaffoldOpenAPI(dir)
+	case "shell":
+		return scaffoldShell(dir)
+	default:
+		return fmt.Errorf("unknown template %q; supported: python, openapi, shell", template)
+	}
+}
+
+func scaffoldPython(dir string) error {
+	toolsDir := filepath.Join(dir, "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		return fmt.Errorf("create tools dir: %w", err)
+	}
+
+	calcCode := `"""Example calculator tool for FolderMCP.
+
+foldermcp:tool calculate
+foldermcp:description Perform basic arithmetic operations
+foldermcp:risk read_only
+foldermcp:param operation string The operation to perform (add, subtract, multiply, divide)
+foldermcp:param a number First operand
+foldermcp:param b number Second operand
+"""
+
+
+def calculate(operation: str, a: float, b: float) -> float:
+    """Perform basic arithmetic operations."""
+    ops = {
+        "add": lambda x, y: x + y,
+        "subtract": lambda x, y: x - y,
+        "multiply": lambda x, y: x * y,
+        "divide": lambda x, y: x / y if y != 0 else float("inf"),
+    }
+    if operation not in ops:
+        raise ValueError(f"Unknown operation: {operation}. Use: add, subtract, multiply, divide")
+    return ops[operation](a, b)
+`
+
+	textCode := `"""Example text processing tool for FolderMCP.
+
+foldermcp:tool word_count
+foldermcp:description Count words, characters, and lines in text
+foldermcp:risk read_only
+foldermcp:param text string The text to analyze
+"""
+
+
+def word_count(text: str) -> dict:
+    """Count words, characters, and lines in text."""
+    return {
+        "words": len(text.split()),
+        "characters": len(text),
+        "lines": len(text.splitlines()),
+    }
+`
+
+	if err := os.WriteFile(filepath.Join(toolsDir, "example_calculator.py"), []byte(calcCode), 0o644); err != nil {
+		return fmt.Errorf("write calculator: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsDir, "example_text.py"), []byte(textCode), 0o644); err != nil {
+		return fmt.Errorf("write text tool: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "Created example project with Python tools:")
+	fmt.Fprintln(os.Stderr, "  tools/example_calculator.py")
+	fmt.Fprintln(os.Stderr, "  tools/example_text.py")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Run 'foldermcp init .' to scan.")
+	return nil
+}
+
+func scaffoldOpenAPI(dir string) error {
+	apiDir := filepath.Join(dir, "api")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		return fmt.Errorf("create api dir: %w", err)
+	}
+
+	spec := `openapi: "3.0.3"
+info:
+  title: Example User API
+  version: "1.0.0"
+  description: A simple User API for FolderMCP demonstration
+paths:
+  /users:
+    get:
+      operationId: list_users
+      summary: List all users
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      operationId: create_user
+      summary: Create a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserInput"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+  /users/{id}:
+    get:
+      operationId: get_user
+      summary: Get a user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+    UserInput:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+`
+
+	if err := os.WriteFile(filepath.Join(apiDir, "example.yaml"), []byte(spec), 0o644); err != nil {
+		return fmt.Errorf("write openapi spec: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "Created example project with OpenAPI spec:")
+	fmt.Fprintln(os.Stderr, "  api/example.yaml")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Run 'foldermcp init .' to scan.")
+	return nil
+}
+
+func scaffoldShell(dir string) error {
+	toolsDir := filepath.Join(dir, "tools")
+	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+		return fmt.Errorf("create tools dir: %w", err)
+	}
+
+	shellCode := `#!/usr/bin/env bash
+# foldermcp:tool disk_usage
+# foldermcp:description Show disk usage for the current directory
+# foldermcp:risk read_only
+
+du -sh "${1:-.}" 2>/dev/null || echo "Unable to determine disk usage"
+`
+
+	if err := os.WriteFile(filepath.Join(toolsDir, "example_disk_usage.sh"), []byte(shellCode), 0o755); err != nil {
+		return fmt.Errorf("write shell tool: %w", err)
+	}
+
+	fmt.Fprintln(os.Stderr, "Created example project with shell tool:")
+	fmt.Fprintln(os.Stderr, "  tools/example_disk_usage.sh")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Run 'foldermcp init .' to scan.")
 	return nil
 }
