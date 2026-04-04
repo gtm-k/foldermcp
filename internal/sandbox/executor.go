@@ -80,6 +80,14 @@ func (e *Executor) RunPython(ctx context.Context, code string, venvPath string, 
 	cmd := exec.CommandContext(ctx, pythonBin, "-c", code)
 
 	// Build environment: inherit current env, add venv PATH, then extras.
+	// Prevent Python from creating __pycache__ directories (important on NAS).
+	if env == nil {
+		env = make(map[string]string)
+	}
+	if _, exists := env["PYTHONDONTWRITEBYTECODE"]; !exists {
+		env["PYTHONDONTWRITEBYTECODE"] = "1"
+	}
+
 	cmdEnv := os.Environ()
 	if venvPath != "" {
 		// Prepend venv bin to PATH (Scripts on Windows, bin elsewhere).

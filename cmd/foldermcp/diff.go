@@ -89,7 +89,10 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Modified tools: in both, but description or schema changed.
+	// Load shared approvals for content hash comparison.
+	approvals, _ := workspace.LoadApprovals(ws.ApprovalsPath())
+
+	// Modified tools: in both, but description, schema, or content changed.
 	for _, d := range discovered {
 		c, exists := currentMap[d.Name]
 		if !exists {
@@ -112,6 +115,17 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		}
 		if !jsonEqual(dSchema, cSchema) {
 			reasons = append(reasons, "schema changed")
+		}
+
+		// Check content hash: if the approvals store has a hash for this
+		// tool (set at approval time), compare it to the current file.
+		if approvals != nil {
+			if entry, ok := approvals.Tools[d.Name]; ok && entry.ContentHash != "" {
+				currentHash, err := workspace.HashFile(d.SourceFile)
+				if err == nil && currentHash != entry.ContentHash {
+					reasons = append(reasons, "content modified")
+				}
+			}
 		}
 
 		if len(reasons) > 0 {

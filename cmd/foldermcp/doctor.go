@@ -133,7 +133,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			if !jsonOutput {
 				_, _ = fmt.Fprintln(os.Stdout, "  info Filesystem: network")
 				_, _ = fmt.Fprintf(os.Stdout, "       State stored locally at %s\n", ws.LocalDir)
-				_, _ = fmt.Fprintf(os.Stdout, "       Approvals shared at %s\n", ws.ApprovalsPath())
+				_, _ = fmt.Fprintf(os.Stdout, "       Config shared at %s\n", ws.ConfigPath())
 			}
 		} else {
 			checks = append(checks, doctorCheck{Name: "filesystem", Status: "ok", Message: fmt.Sprintf("Filesystem: local (workspace at %s)", ws.LocalDir)})

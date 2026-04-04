@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Workspace represents the split-storage layout for a FolderMCP project.
@@ -32,22 +33,27 @@ func Open(projectDir string) (*Workspace, error) {
 	}
 	canonical = filepath.Clean(canonical)
 
-	// 2. Compute workspace hash: first 12 hex chars of SHA-256 of canonical path.
-	hash := computeHash(canonical)
+	// 2. Normalize to forward-slash form for hashing so that UNC paths
+	//    (\\server\share and //server/share) produce the same hash
+	//    regardless of how the path was supplied.
+	normalizedForHash := filepath.ToSlash(canonical)
 
-	// 3. LocalDir = ~/.foldermcp/workspaces/<hash>/
+	// 3. Compute workspace hash from the normalized path.
+	hash := computeHash(normalizedForHash)
+
+	// 4. LocalDir = ~/.foldermcp/workspaces/<hash>/
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("determine home directory: %w", err)
 	}
 	localDir := filepath.Join(home, ".foldermcp", "workspaces", hash)
 
-	// 4. Create LocalDir if needed.
+	// 5. Create LocalDir if needed.
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create local workspace dir: %w", err)
 	}
 
-	// 5. Detect if projectDir is on a network filesystem.
+	// 6. Detect if projectDir is on a network filesystem.
 	isNetwork := detectNetworkFS(canonical)
 
 	return &Workspace{
@@ -55,6 +61,11 @@ func Open(projectDir string) (*Workspace, error) {
 		LocalDir:    localDir,
 		IsNetworkFS: isNetwork,
 	}, nil
+}
+
+// isUNCPath returns true if the path is a UNC path (\\server\share or //server/share).
+func isUNCPath(path string) bool {
+	return strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//")
 }
 
 // computeHash returns the first 12 hex characters of the SHA-256 digest of s.
