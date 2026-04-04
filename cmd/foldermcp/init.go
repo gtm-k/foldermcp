@@ -11,6 +11,7 @@ import (
 	"github.com/foldermcp/foldermcp/internal/config"
 	"github.com/foldermcp/foldermcp/internal/introspect"
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -48,28 +49,36 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not a directory: %s", absDir)
 	}
 
+	// Open workspace (split storage: local state vs project dir).
+	ws, err := workspace.Open(absDir)
+	if err != nil {
+		return fmt.Errorf("open workspace: %w", err)
+	}
+
 	// Load or create config.
-	cfg, err := config.Load(absDir)
+	cfg, err := config.Load(ws.ProjectDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
 	// Save config if it doesn't exist yet.
-	configPath := filepath.Join(absDir, "foldermcp.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		if err := config.Save(absDir, cfg); err != nil {
+	if _, err := os.Stat(ws.ConfigPath()); os.IsNotExist(err) {
+		if err := config.Save(ws.ProjectDir, cfg); err != nil {
 			return fmt.Errorf("save config: %w", err)
 		}
 		fmt.Fprintln(os.Stderr, "Created foldermcp.yaml")
 	}
 
-	// Open state store.
-	stateDir := filepath.Join(absDir, ".foldermcp")
-	store, err := state.Open(stateDir)
+	// Open state store (SQLite always on local disk).
+	store, err := state.Open(ws.LocalDir)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
+
+	if ws.IsNetworkFS {
+		fmt.Fprintf(os.Stderr, "Network filesystem detected. State stored locally at %s\n", ws.LocalDir)
+	}
 
 	// Scan directory for tools.
 	start := time.Now()

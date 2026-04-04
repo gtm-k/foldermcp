@@ -9,6 +9,7 @@ import (
 
 	"github.com/foldermcp/foldermcp/internal/config"
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -75,6 +76,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
 	}
+
+	ws, wsErr := workspace.Open(dir)
+
 	configPath := filepath.Join(dir, "foldermcp.yaml")
 	if _, err := os.Stat(configPath); err == nil {
 		_, _ = fmt.Fprintln(os.Stdout, "  ok   foldermcp.yaml exists")
@@ -94,8 +98,28 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		issues++
 	}
 
-	// Check 4: State store accessible, count enabled tools.
-	stateDir := filepath.Join(dir, ".foldermcp")
+	// Check 4: Filesystem type and workspace paths.
+	if wsErr == nil {
+		if ws.IsNetworkFS {
+			_, _ = fmt.Fprintln(os.Stdout, "  info Filesystem: network")
+			_, _ = fmt.Fprintf(os.Stdout, "       State stored locally at %s\n", ws.LocalDir)
+			_, _ = fmt.Fprintf(os.Stdout, "       Approvals shared at %s\n", ws.ApprovalsPath())
+		} else {
+			_, _ = fmt.Fprintln(os.Stdout, "  ok   Filesystem: local")
+			_, _ = fmt.Fprintf(os.Stdout, "       Workspace: %s\n", ws.LocalDir)
+		}
+	} else {
+		_, _ = fmt.Fprintf(os.Stdout, "  WARN Cannot determine filesystem type: %v\n", wsErr)
+		issues++
+	}
+
+	// Check 5: State store accessible, count enabled tools.
+	var stateDir string
+	if wsErr == nil {
+		stateDir = ws.LocalDir
+	} else {
+		stateDir = filepath.Join(dir, ".foldermcp")
+	}
 	store, storeErr := state.Open(stateDir)
 	if storeErr == nil {
 		tools, listErr := store.ListTools()
@@ -132,7 +156,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		issues++
 	}
 
-	// Check 5: Claude Desktop config exists.
+	// Check 6: Claude Desktop config exists.
 	claudeConfigPath := claudeDesktopConfigPath()
 	if claudeConfigPath != "" {
 		if _, err := os.Stat(claudeConfigPath); err == nil {

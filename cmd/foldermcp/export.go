@@ -7,6 +7,7 @@ import (
 
 	"github.com/foldermcp/foldermcp/internal/export"
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -45,18 +46,22 @@ func exportA2A(cmd *cobra.Command) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
+	ws, err := workspace.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open workspace: %w", err)
+	}
+
 	name, _ := cmd.Flags().GetString("name")
 	if name == "" {
-		name = filepath.Base(dir)
+		name = filepath.Base(ws.ProjectDir)
 	}
 	version, _ := cmd.Flags().GetString("version")
 	url, _ := cmd.Flags().GetString("url")
 
 	// Try to load tools from the state store.
-	stateDir := filepath.Join(dir, ".foldermcp")
 	var tools []state.Tool
 
-	store, err := state.Open(stateDir)
+	store, err := state.Open(ws.LocalDir)
 	if err == nil {
 		defer func() { _ = store.Close() }()
 		tools, err = store.ListTools()

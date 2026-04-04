@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/foldermcp/foldermcp/internal/studio"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -32,14 +33,17 @@ func runUI(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	stateDir := filepath.Join(dir, ".foldermcp")
-
-	// Verify state directory exists.
-	if _, err := os.Stat(stateDir); os.IsNotExist(err) {
-		return fmt.Errorf("state directory not found at %s; run 'foldermcp init' first", stateDir)
+	ws, err := workspace.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open workspace: %w", err)
 	}
 
-	srv := studio.NewStudioServer(stateDir, port)
+	// Verify state directory exists.
+	if _, err := os.Stat(ws.LocalDir); os.IsNotExist(err) {
+		return fmt.Errorf("state directory not found at %s; run 'foldermcp init' first", ws.LocalDir)
+	}
+
+	srv := studio.NewStudioServer(ws.LocalDir, port)
 
 	// Handle graceful shutdown on interrupt.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

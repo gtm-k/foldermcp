@@ -9,6 +9,7 @@ import (
 
 	"github.com/foldermcp/foldermcp/internal/config"
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -61,13 +62,17 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	cfg, err := config.Load(dir)
+	ws, err := workspace.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open workspace: %w", err)
+	}
+
+	cfg, err := config.Load(ws.ProjectDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	stateDir := filepath.Join(dir, ".foldermcp")
-	store, err := state.Open(stateDir)
+	store, err := state.Open(ws.LocalDir)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
@@ -143,20 +148,20 @@ func runReview(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Fprintf(os.Stderr, "Approved %d tools and %d resources\n", len(pendingTools), len(pendingResources))
-		return config.Save(dir, cfg)
+		return config.Save(ws.ProjectDir, cfg)
 	}
 
 	// Batch mode: apply --approve, --disable, and --confirm flags directly.
 	if len(approveList) > 0 || len(disableList) > 0 || len(confirmList) > 0 {
-		return reviewBatch(store, cfg, dir, approveList, disableList, confirmList, resourceNames)
+		return reviewBatch(store, cfg, ws.ProjectDir, approveList, disableList, confirmList, resourceNames)
 	}
 
 	// Interactive mode.
 	switch mode {
 	case "dev", "team":
-		return reviewDevMode(store, cfg, dir, tools, resources)
+		return reviewDevMode(store, cfg, ws.ProjectDir, tools, resources)
 	case "production":
-		return reviewProductionMode(store, cfg, dir, tools, resources)
+		return reviewProductionMode(store, cfg, ws.ProjectDir, tools, resources)
 	default:
 		return fmt.Errorf("unknown mode %q (use dev, team, or production)", mode)
 	}

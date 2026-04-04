@@ -10,6 +10,7 @@ import (
 	"github.com/foldermcp/foldermcp/internal/audit"
 	"github.com/foldermcp/foldermcp/internal/sandbox"
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -44,17 +45,20 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	// Open state store.
-	stateDir := filepath.Join(dir, ".foldermcp")
-	store, err := state.Open(stateDir)
+	ws, err := workspace.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open workspace: %w", err)
+	}
+
+	// Open state store (SQLite always on local disk).
+	store, err := state.Open(ws.LocalDir)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
 	defer func() { _ = store.Close() }()
 
 	// Create audit logger.
-	logPath := filepath.Join(stateDir, "audit.log")
-	logger, err := audit.NewLogger(logPath)
+	logger, err := audit.NewLogger(ws.AuditLogPath())
 	if err == nil {
 		defer func() { _ = logger.Close() }()
 	}

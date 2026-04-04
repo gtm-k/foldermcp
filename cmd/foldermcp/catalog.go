@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -27,8 +28,12 @@ func runCatalog(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	stateDir := filepath.Join(dir, ".foldermcp")
-	store, err := state.Open(stateDir)
+	ws, err := workspace.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open workspace: %w", err)
+	}
+
+	store, err := state.Open(ws.LocalDir)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}

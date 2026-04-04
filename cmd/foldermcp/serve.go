@@ -14,6 +14,7 @@ import (
 	"github.com/foldermcp/foldermcp/internal/sandbox"
 	"github.com/foldermcp/foldermcp/internal/server"
 	"github.com/foldermcp/foldermcp/internal/state"
+	"github.com/foldermcp/foldermcp/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -45,14 +46,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	cfg, err := config.Load(dir)
+	ws, err := workspace.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open workspace: %w", err)
+	}
+
+	cfg, err := config.Load(ws.ProjectDir)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// Open state store.
-	stateDir := filepath.Join(dir, ".foldermcp")
-	store, err := state.Open(stateDir)
+	// Open state store (SQLite always on local disk).
+	store, err := state.Open(ws.LocalDir)
 	if err != nil {
 		return fmt.Errorf("open state store: %w", err)
 	}
@@ -95,8 +100,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	sanitizer := sandbox.NewSanitizer(100 * 1024)
 
 	// Create audit logger.
-	auditPath := filepath.Join(stateDir, "audit.log")
-	logger, err := audit.NewLogger(auditPath)
+	logger, err := audit.NewLogger(ws.AuditLogPath())
 	if err != nil {
 		return fmt.Errorf("create audit logger: %w", err)
 	}
@@ -123,7 +127,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	useHTTP := transport == "http" || mode == "team"
 
 	if useHTTP {
-		return serveHTTP(mcpServer, stateDir, port)
+		return serveHTTP(mcpServer, ws, port)
 	}
 
 	// Set up signal handling for stdio mode.
@@ -139,23 +143,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 }
 
 // serveHTTP starts the MCP server over Streamable HTTP with API key auth and
-// self-signed TLS. The API key is persisted to .foldermcp/api.key so it
-// survives restarts.
-func serveHTTP(mcpServer *server.MCPServer, stateDir string, port int) error {
-	// Ensure state directory exists.
-	if err := os.MkdirAll(stateDir, 0700); err != nil {
-		return fmt.Errorf("create state dir: %w", err)
-	}
-
+// self-signed TLS. The API key and TLS certs are stored in the local workspace
+// directory so they never end up on a network share.
+func serveHTTP(mcpServer *server.MCPServer, ws *workspace.Workspace, port int) error {
 	// Load or generate API key.
-	apiKeyPath := filepath.Join(stateDir, "api.key")
-	apiKey, err := loadOrGenerateAPIKey(apiKeyPath)
+	apiKey, err := loadOrGenerateAPIKey(ws.APIKeyPath())
 	if err != nil {
 		return fmt.Errorf("api key: %w", err)
 	}
 
+	// Ensure TLS directory exists.
+	if err := os.MkdirAll(ws.TLSDir(), 0700); err != nil {
+		return fmt.Errorf("create TLS dir: %w", err)
+	}
+
 	// Generate self-signed TLS certificate.
-	certFile, keyFile, err := server.GenerateSelfSignedCert(stateDir)
+	certFile, keyFile, err := server.GenerateSelfSignedCert(ws.TLSDir())
 	if err != nil {
 		return fmt.Errorf("generate TLS cert: %w", err)
 	}
