@@ -43,9 +43,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve path: %w", err)
 	}
 
-	// Handle --template scaffolding before anything else.
+	// Handle --template scaffolding before the scan.
 	if initTemplate != "" {
-		return scaffoldTemplate(absDir, initTemplate)
+		if err := scaffoldTemplate(absDir, initTemplate); err != nil {
+			return err
+		}
+		// Fall through to the normal scan logic so users don't need to
+		// run "init" twice after scaffolding template files.
 	}
 
 	// Validate directory exists.
@@ -96,7 +100,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("scan directory: %w", err)
 	}
 
-	// Upsert each discovered tool into state store.
+	// Build the batch of tools to upsert in a single transaction.
+	stateTools := make([]state.Tool, 0, len(tools))
 	for _, tm := range tools {
 		// Check if the tool has an override in config.
 		toolState := "pending"
@@ -119,17 +124,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 			schemaJSON = `{"type":"object","properties":{}}`
 		}
 
-		t := state.Tool{
+		stateTools = append(stateTools, state.Tool{
 			Name:        tm.Name,
 			SourceFile:  tm.SourceFile,
 			Description: tm.Description,
 			InputSchema: schemaJSON,
 			Risk:        risk,
 			State:       toolState,
-		}
-		if err := store.UpsertTool(t); err != nil {
-			return fmt.Errorf("upsert tool %q: %w", tm.Name, err)
-		}
+		})
+	}
+	if err := store.UpsertToolsBatch(stateTools); err != nil {
+		return fmt.Errorf("batch upsert tools: %w", err)
 	}
 
 	// Discover resources.
@@ -236,8 +241,6 @@ def word_count(text: str) -> dict:
 	fmt.Fprintln(os.Stderr, "Created example project with Python tools:")
 	fmt.Fprintln(os.Stderr, "  tools/example_calculator.py")
 	fmt.Fprintln(os.Stderr, "  tools/example_text.py")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Run 'foldermcp init .' to scan.")
 	return nil
 }
 
@@ -328,8 +331,6 @@ components:
 
 	fmt.Fprintln(os.Stderr, "Created example project with OpenAPI spec:")
 	fmt.Fprintln(os.Stderr, "  api/example.yaml")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Run 'foldermcp init .' to scan.")
 	return nil
 }
 
@@ -353,7 +354,5 @@ du -sh "${1:-.}" 2>/dev/null || echo "Unable to determine disk usage"
 
 	fmt.Fprintln(os.Stderr, "Created example project with shell tool:")
 	fmt.Fprintln(os.Stderr, "  tools/example_disk_usage.sh")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Run 'foldermcp init .' to scan.")
 	return nil
 }

@@ -150,6 +150,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 			if err := store.UpdateToolState(t.Name, "enabled"); err != nil {
 				return fmt.Errorf("approve %q: %w", t.Name, err)
 			}
+			storeToolHash(store, t)
 			if cfg.Tools == nil {
 				cfg.Tools = make(map[string]config.ToolConfig)
 			}
@@ -196,6 +197,23 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// storeToolHash computes the content hash of a tool's source file and persists
+// it in the state store. This is called whenever a tool is approved so that
+// the server can verify integrity at execution time (SEC-01).
+func storeToolHash(store *state.Store, t state.Tool) {
+	if t.SourceFile == "" {
+		return
+	}
+	hash, err := workspace.HashFile(t.SourceFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: could not hash %s: %v\n", t.SourceFile, err)
+		return
+	}
+	if err := store.UpdateContentHash(t.Name, hash); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: could not store hash for %s: %v\n", t.Name, err)
+	}
+}
+
 func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, disable, confirm []string, resourceNames map[string]bool) error {
 	for _, name := range approve {
 		if resourceNames[name] {
@@ -206,6 +224,9 @@ func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, di
 		} else {
 			if err := store.UpdateToolState(name, "enabled"); err != nil {
 				return fmt.Errorf("approve %q: %w", name, err)
+			}
+			if t, _ := store.GetTool(name); t != nil {
+				storeToolHash(store, *t)
 			}
 			if cfg.Tools == nil {
 				cfg.Tools = make(map[string]config.ToolConfig)
@@ -246,6 +267,9 @@ func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, di
 		if err := store.UpdateToolState(name, "requires_confirmation"); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", name, err)
 		} else {
+			if t, _ := store.GetTool(name); t != nil {
+				storeToolHash(store, *t)
+			}
 			if cfg.Tools == nil {
 				cfg.Tools = make(map[string]config.ToolConfig)
 			}
@@ -279,25 +303,45 @@ func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []s
 		return nil
 	}
 
-	// Count read-only vs side-effect tools.
+	// Count tools by risk category.
 	readOnly := 0
 	sideEffects := 0
 	destructive := 0
+	network := 0
 	for _, t := range pendingTools {
-		if t.Risk == "destructive" {
+		switch t.Risk {
+		case "destructive":
 			destructive++
-		}
-		if t.Risk == "" || t.Risk == "none" || t.Risk == "low" {
-			readOnly++
-		} else {
+		case "side_effects":
 			sideEffects++
+		case "network":
+			network++
+		default:
+			// read_only plus any unset/unknown risk values
+			readOnly++
 		}
 	}
 	if destructive > 0 {
 		fmt.Fprintf(os.Stderr, "WARNING: %d tool(s) are labeled 'destructive'\n", destructive)
 	}
-	fmt.Fprintf(os.Stderr, "%d tools found (%d read-only, %d with side-effects) and %d resources. Approve all for local dev? [y/N] ",
-		len(pendingTools), readOnly, sideEffects, len(pendingResources))
+
+	// Build a human-readable risk summary.
+	var parts []string
+	if readOnly > 0 {
+		parts = append(parts, fmt.Sprintf("%d read-only", readOnly))
+	}
+	if sideEffects > 0 {
+		parts = append(parts, fmt.Sprintf("%d side-effects", sideEffects))
+	}
+	if destructive > 0 {
+		parts = append(parts, fmt.Sprintf("%d destructive", destructive))
+	}
+	if network > 0 {
+		parts = append(parts, fmt.Sprintf("%d network", network))
+	}
+	riskSummary := strings.Join(parts, ", ")
+	fmt.Fprintf(os.Stderr, "%d tools found (%s) and %d resources. Approve all for local dev? [y/N] ",
+		len(pendingTools), riskSummary, len(pendingResources))
 	reader := bufio.NewReader(os.Stdin)
 	answer, _ := reader.ReadString('\n')
 	answer = strings.TrimSpace(strings.ToLower(answer))
@@ -307,6 +351,7 @@ func reviewDevMode(store *state.Store, cfg *config.Config, dir string, tools []s
 			if err := store.UpdateToolState(t.Name, "enabled"); err != nil {
 				return fmt.Errorf("approve %q: %w", t.Name, err)
 			}
+			storeToolHash(store, t)
 			if cfg.Tools == nil {
 				cfg.Tools = make(map[string]config.ToolConfig)
 			}
@@ -362,6 +407,9 @@ func reviewProductionMode(store *state.Store, cfg *config.Config, dir string, to
 
 		if err := store.UpdateToolState(t.Name, newState); err != nil {
 			return fmt.Errorf("update %q: %w", t.Name, err)
+		}
+		if newState == "enabled" || newState == "requires_confirmation" {
+			storeToolHash(store, t)
 		}
 		if cfg.Tools == nil {
 			cfg.Tools = make(map[string]config.ToolConfig)

@@ -47,7 +47,6 @@ var mimeMap = map[string]string{
 	".yaml": "text/yaml",
 	".yml":  "text/yaml",
 	".toml": "text/toml",
-	".env":  "text/plain",
 }
 
 // typeMap maps file extensions to resource types.
@@ -60,7 +59,7 @@ var typeMap = map[string]string{
 
 	".csv": "data", ".json": "data", ".parquet": "data", ".xlsx": "data",
 
-	".yaml": "config", ".yml": "config", ".toml": "config", ".env": "config",
+	".yaml": "config", ".yml": "config", ".toml": "config",
 }
 
 // codeExtensions lists extensions handled by tool introspectors that should be skipped.
@@ -94,6 +93,12 @@ func (r *ResourceIntrospector) Discover(dir string, includes, excludes []string)
 		}
 		// Skip symlinks for safety.
 		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+
+		// Skip .env files for security (SEC-02).
+		baseName := filepath.Base(path)
+		if strings.HasPrefix(baseName, ".env") {
 			return nil
 		}
 
@@ -146,9 +151,9 @@ func (r *ResourceIntrospector) Discover(dir string, includes, excludes []string)
 			absPath = path
 		}
 
-		// Use filename without extension as the resource name, but include
-		// the extension to avoid collisions (e.g. guide.md vs guide.pdf).
-		baseName := filepath.Base(path)
+		// Use filename (already computed above for .env check) as the
+		// resource name, including the extension to avoid collisions
+		// (e.g. guide.md vs guide.pdf).
 
 		resources = append(resources, ResourceMetadata{
 			Name:      baseName,

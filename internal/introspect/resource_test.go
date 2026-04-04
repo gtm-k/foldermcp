@@ -117,7 +117,7 @@ func TestResourceIntrospector_MimeDetection(t *testing.T) {
 		{"config.yaml", "text/yaml", "config"},
 		{"config.yml", "text/yaml", "config"},
 		{"config.toml", "text/toml", "config"},
-		{"secrets.env", "text/plain", "config"},
+		// .env files are skipped for security (SEC-02).
 		{"sheet.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "data"},
 		{"report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "document"},
 	}
@@ -126,7 +126,7 @@ func TestResourceIntrospector_MimeDetection(t *testing.T) {
 	includes := []string{
 		"**/*.pdf", "**/*.md", "**/*.txt", "**/*.png", "**/*.jpg", "**/*.jpeg",
 		"**/*.svg", "**/*.gif", "**/*.csv", "**/*.json", "**/*.yaml", "**/*.yml",
-		"**/*.toml", "**/*.env", "**/*.xlsx", "**/*.docx",
+		"**/*.toml", "**/*.xlsx", "**/*.docx",
 	}
 
 	for _, tc := range testCases {

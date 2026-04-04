@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gtm-k/foldermcp/internal/pythonrt"
@@ -37,6 +38,8 @@ type ExecutionResult struct {
 type Executor struct {
 	config    ExecutorConfig
 	semaphore chan struct{}
+	dotEnv    map[string]string // cached .env values (loaded once)
+	dotEnvOnce sync.Once
 }
 
 // NewExecutor creates an Executor with the given config.
@@ -202,6 +205,9 @@ func (e *Executor) RunPythonFile(ctx context.Context, filePath, funcName, argsJS
 		if err := validatePath(filePath, e.config.WorkspaceRoot); err != nil {
 			return nil, fmt.Errorf("path validation failed: %w", err)
 		}
+	} else {
+		// Path validation disabled — this should only happen in tests (SEC-08).
+		fmt.Fprintf(os.Stderr, "WARNING: WorkspaceRoot not set, path validation disabled\n")
 	}
 
 	// Pass untrusted data via environment variables, not string interpolation.
@@ -209,9 +215,9 @@ func (e *Executor) RunPythonFile(ctx context.Context, filePath, funcName, argsJS
 		env = make(map[string]string)
 	}
 
-	// Load .env from workspace root, merging underneath per-tool env vars.
+	// Load .env from workspace root (cached), merging underneath per-tool env vars.
 	if e.config.WorkspaceRoot != "" {
-		dotEnv, err := LoadDotEnv(e.config.WorkspaceRoot)
+		dotEnv, err := e.loadDotEnvCached()
 		if err != nil {
 			return nil, fmt.Errorf("load .env: %w", err)
 		}
@@ -227,6 +233,18 @@ func (e *Executor) RunPythonFile(ctx context.Context, filePath, funcName, argsJS
 	env["_FOLDERMCP_ARGS"] = argsJSON
 
 	return e.RunPython(ctx, pythonFileScript, venvPath, env)
+}
+
+// loadDotEnvCached returns the cached .env values, loading them on first call.
+func (e *Executor) loadDotEnvCached() (map[string]string, error) {
+	var loadErr error
+	e.dotEnvOnce.Do(func() {
+		e.dotEnv, loadErr = LoadDotEnv(e.config.WorkspaceRoot)
+	})
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	return e.dotEnv, nil
 }
 
 // LoadDotEnv reads a .env file from dir and returns the key-value pairs.

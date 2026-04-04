@@ -88,8 +88,9 @@ Every tool invocation is recorded in a local audit log at
 Each tool is assigned a risk level during introspection:
 
 - **read_only** -- No side effects.
-- **state_changing** -- Modifies external state.
+- **side_effects** -- Modifies external state.
 - **destructive** -- Irreversible operations.
+- **network** -- Makes network requests.
 
 High-risk tools can be configured to require human confirmation before each
 invocation.

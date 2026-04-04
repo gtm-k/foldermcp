@@ -142,7 +142,11 @@ func runCatalog(cmd *cobra.Command, args []string) error {
 	}
 	for _, t := range tools {
 		desc := truncateString(t.Description, 50)
-		if _, err := fmt.Fprintf(w, "%s\ttool\t%s\t%s\t%s\t%s\n", t.Name, t.State, t.Risk, t.SourceFile, desc); err != nil {
+		source := t.SourceFile
+		if rel, err := filepath.Rel(dir, t.SourceFile); err == nil {
+			source = rel
+		}
+		if _, err := fmt.Fprintf(w, "%s\ttool\t%s\t%s\t%s\t%s\n", t.Name, t.State, t.Risk, source, desc); err != nil {
 			return fmt.Errorf("write tool row: %w", err)
 		}
 	}

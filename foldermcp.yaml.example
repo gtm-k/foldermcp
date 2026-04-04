@@ -28,9 +28,9 @@ scan:
 tools:
   # Example tool:
   # shell_exec:
-  #   state: "enabled"        # enabled | disabled | ask
+  #   state: "enabled"        # enabled | disabled | requires_confirmation
   #   description: "Execute shell commands in a sandboxed environment"
-  #   risk: "high"            # low | medium | high
+  #   risk: "side_effects"    # read_only | side_effects | destructive | network
 
 # Project dependencies by ecosystem.
 dependencies:
