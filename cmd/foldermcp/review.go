@@ -23,6 +23,7 @@ is reviewed individually. Use --approve and --disable flags for batch mode.`,
 func init() {
 	reviewCmd.Flags().StringSlice("approve", nil, "tool names to approve (batch mode)")
 	reviewCmd.Flags().StringSlice("disable", nil, "tool names to disable (batch mode)")
+	reviewCmd.Flags().StringSlice("confirm", nil, "tool names to set as requires_confirmation (batch mode)")
 	reviewCmd.Flags().String("mode", "dev", "review mode: dev, team, production")
 	rootCmd.AddCommand(reviewCmd)
 }
@@ -30,17 +31,24 @@ func init() {
 func runReview(cmd *cobra.Command, args []string) error {
 	approveList, _ := cmd.Flags().GetStringSlice("approve")
 	disableList, _ := cmd.Flags().GetStringSlice("disable")
+	confirmList, _ := cmd.Flags().GetStringSlice("confirm")
 	mode, _ := cmd.Flags().GetString("mode")
 
-	// Check for conflicts between --approve and --disable.
-	if len(approveList) > 0 && len(disableList) > 0 {
-		approveSet := make(map[string]bool)
+	// Check for conflicts between --approve, --disable, and --confirm.
+	if len(approveList) > 0 || len(disableList) > 0 || len(confirmList) > 0 {
+		seen := make(map[string]string)
 		for _, name := range approveList {
-			approveSet[name] = true
+			seen[name] = "--approve"
 		}
 		for _, name := range disableList {
-			if approveSet[name] {
-				return fmt.Errorf("tool %q appears in both --approve and --disable", name)
+			if prev, ok := seen[name]; ok {
+				return fmt.Errorf("tool %q appears in both %s and --disable", name, prev)
+			}
+			seen[name] = "--disable"
+		}
+		for _, name := range confirmList {
+			if prev, ok := seen[name]; ok {
+				return fmt.Errorf("tool %q appears in both %s and --confirm", name, prev)
 			}
 		}
 	}
@@ -72,9 +80,9 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Batch mode: apply --approve and --disable flags directly.
-	if len(approveList) > 0 || len(disableList) > 0 {
-		return reviewBatch(store, cfg, dir, approveList, disableList)
+	// Batch mode: apply --approve, --disable, and --confirm flags directly.
+	if len(approveList) > 0 || len(disableList) > 0 || len(confirmList) > 0 {
+		return reviewBatch(store, cfg, dir, approveList, disableList, confirmList)
 	}
 
 	// Interactive mode.
@@ -88,7 +96,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, disable []string) error {
+func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, disable, confirm []string) error {
 	for _, name := range approve {
 		if err := store.UpdateToolState(name, "enabled"); err != nil {
 			return fmt.Errorf("approve %q: %w", name, err)
@@ -113,6 +121,20 @@ func reviewBatch(store *state.Store, cfg *config.Config, dir string, approve, di
 		tc.State = "disabled"
 		cfg.Tools[name] = tc
 		fmt.Fprintf(os.Stderr, "Disabled: %s\n", name)
+	}
+
+	for _, name := range confirm {
+		if err := store.UpdateToolState(name, "requires_confirmation"); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", name, err)
+		} else {
+			if cfg.Tools == nil {
+				cfg.Tools = make(map[string]config.ToolConfig)
+			}
+			tc := cfg.Tools[name]
+			tc.State = "requires_confirmation"
+			cfg.Tools[name] = tc
+			fmt.Fprintf(os.Stderr, "Set requires_confirmation: %s\n", name)
+		}
 	}
 
 	return config.Save(dir, cfg)

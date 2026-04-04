@@ -150,7 +150,9 @@ func TestExecutor_SyntaxError(t *testing.T) {
 func TestSanitizer_TruncatesOutput(t *testing.T) {
 	s := NewSanitizer(100)
 
-	input := strings.Repeat("a", 200)
+	// Use a string with spaces so it won't be caught by the longTokenPattern
+	// (which matches 40+ contiguous alphanumeric chars).
+	input := strings.Repeat("hello world ", 20) // 240 chars
 	output := s.Sanitize(input)
 
 	if len(output) > 200 { // truncated + message should be bounded

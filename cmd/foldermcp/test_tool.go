@@ -22,8 +22,11 @@ output, exit code, and duration. Useful for verifying tools before serving.`,
 	RunE: runTestTool,
 }
 
+var testForce bool
+
 func init() {
 	testToolCmd.Flags().String("params", "{}", "JSON parameters to pass to the tool")
+	testToolCmd.Flags().BoolVar(&testForce, "force", false, "Execute even if tool is pending/disabled (bypass safety check)")
 	rootCmd.AddCommand(testToolCmd)
 }
 
@@ -59,11 +62,20 @@ func runTestTool(cmd *cobra.Command, args []string) error {
 
 	// Get tool.
 	tool, err := store.GetTool(toolName)
-	if err != nil {
-		return fmt.Errorf("get tool: %w", err)
-	}
-	if tool == nil {
+	if err != nil || tool == nil {
 		return fmt.Errorf("tool %q not found; run 'foldermcp init' first", toolName)
+	}
+
+	// Enforce deny-by-default: only enabled and requires_confirmation tools can be tested.
+	if !testForce {
+		if tool.State == "disabled" {
+			return fmt.Errorf("tool %q is disabled; run 'foldermcp review --approve=%s' first", toolName, toolName)
+		}
+		if tool.State == "pending" {
+			return fmt.Errorf("tool %q is pending review; run 'foldermcp review --approve=%s' first", toolName, toolName)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "WARNING: --force flag set, bypassing tool state check\n")
 	}
 
 	// Create executor.

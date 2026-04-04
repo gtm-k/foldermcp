@@ -132,8 +132,19 @@ def extract_tools(filepath):
         # Detect async functions
         is_async = isinstance(node, ast.AsyncFunctionDef)
 
-        # Determine risk: decorator kwarg > default
+        # Determine risk: decorator kwarg > heuristic > default
         risk = dec_info.get('risk', 'read_only')
+
+        # Heuristic risk classification from function name (only when no
+        # explicit risk was provided via decorator)
+        if 'risk' not in dec_info:
+            name_lower = node.name.lower()
+            if any(w in name_lower for w in ['delete', 'remove', 'drop', 'destroy', 'purge', 'truncate']):
+                risk = "destructive"
+            elif any(w in name_lower for w in ['send', 'write', 'update', 'create', 'insert', 'post', 'put', 'push', 'deploy', 'execute', 'run', 'modify', 'set', 'notify']):
+                risk = "side_effects"
+            elif any(w in name_lower for w in ['fetch', 'download', 'upload', 'request', 'call', 'connect']):
+                risk = "network"
 
         # Determine tool name: decorator kwarg > function name
         tool_name = dec_info.get('name', node.name)

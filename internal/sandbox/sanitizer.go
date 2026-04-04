@@ -25,7 +25,7 @@ var secretPatterns = []*regexp.Regexp{
 }
 
 // longTokenPattern matches suspiciously long alphanumeric strings (40+ chars)
-// that may be tokens or secrets. Used only in SanitizeParams.
+// that may be tokens or secrets. Used in both Sanitize and SanitizeParams.
 var longTokenPattern = regexp.MustCompile(`[A-Za-z0-9_-]{40,}`)
 
 // Sanitizer redacts secrets and truncates oversized output.
@@ -47,7 +47,10 @@ func (s *Sanitizer) Sanitize(output string) string {
 	// 1. Redact known secret patterns.
 	result := redactSecrets(output)
 
-	// 2. Truncate if over limit.
+	// 2. Redact long token-like strings (40+ alphanumeric chars).
+	result = longTokenPattern.ReplaceAllString(result, "[REDACTED]")
+
+	// 3. Truncate if over limit.
 	if s.maxBytes > 0 && len(result) > s.maxBytes {
 		result = result[:s.maxBytes] + fmt.Sprintf("... [output truncated at %d bytes]", s.maxBytes)
 	}
