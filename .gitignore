@@ -52,3 +52,13 @@ __pycache__/
 # Coverage
 coverage.out
 coverage.html
+
+# Internal docs (kept in separate prd repo)
+PRD*.md
+docs/superpowers/
+
+# Test artifacts
+test-reports/
+test-workspace/
+.playwright-mcp/
+integration_cross_test.go
