@@ -18,9 +18,9 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init [path]",
 	Short: "Initialize a directory as a FolderMCP workspace",
-	Long: `Scans the target directory for Python scripts and OpenAPI specs,
-creates a foldermcp.yaml config (if missing), and populates the state store
-with discovered tools.`,
+	Long: `Scans the target directory for Python, TypeScript/JavaScript, OpenAPI specs,
+shell scripts, and documents (PDF, images, CSV, Markdown). Creates a foldermcp.yaml
+config (if missing) and populates the state store with discovered tools and resources.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInit,
 }
