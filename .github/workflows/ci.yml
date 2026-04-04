@@ -23,20 +23,30 @@ jobs:
           python-version: '3.12'
       - name: Install uv
         run: pip install uv
-      - name: Run tests
+
+      - name: Run tests (Linux/macOS)
+        if: runner.os != 'Windows'
         run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: go test -race ./...
+
       - name: Build binary
+        if: runner.os != 'Windows'
         run: go build -o foldermcp ./cmd/foldermcp
-        if: runner.os != 'Windows'
+
       - name: Build binary (Windows)
+        if: runner.os == 'Windows'
         run: go build -o foldermcp.exe ./cmd/foldermcp
-        if: runner.os == 'Windows'
+
       - name: Verify binary
-        run: ./foldermcp --help
         if: runner.os != 'Windows'
+        run: ./foldermcp --help
+
       - name: Verify binary (Windows)
-        run: ./foldermcp.exe --help
         if: runner.os == 'Windows'
+        run: .\foldermcp.exe --help
 
   integration:
     runs-on: ubuntu-latest
@@ -60,6 +70,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-      - uses: golangci/golangci-lint-action@v4
-        with:
-          version: latest
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
