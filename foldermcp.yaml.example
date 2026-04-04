@@ -51,12 +51,15 @@ tool_routing:
   strategy: "profile"
 
   # Named profiles — each maps a profile name to a list of tool names.
+  # Use with: foldermcp serve --profile=read_only
   profiles:
-    # Example:
-    # backend:
-    #   - shell_exec
-    #   - file_read
-    #   - file_write
-    # frontend:
-    #   - browser_preview
-    #   - file_read
+    # read_only:
+    #   - query_db
+    #   - list_files
+    #   - search_docs
+    # admin:
+    #   - delete_records
+    #   - deploy_to_prod
+    # data_science:
+    #   - run_analysis
+    #   - generate_report

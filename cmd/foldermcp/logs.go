@@ -73,7 +73,11 @@ func tailLog(logPath string, n int) error {
 	}
 
 	for _, line := range lines {
-		fmt.Println(formatLogLine(line))
+		if jsonOutput {
+			fmt.Println(line)
+		} else {
+			fmt.Println(formatLogLine(line))
+		}
 	}
 	return nil
 }
@@ -106,7 +110,11 @@ func followLog(logPath string) error {
 			continue
 		}
 		if line != "" {
-			fmt.Print(formatLogLine(line))
+			if jsonOutput {
+				fmt.Print(line)
+			} else {
+				fmt.Print(formatLogLine(line))
+			}
 			if line[len(line)-1] != '\n' {
 				fmt.Println()
 			}
