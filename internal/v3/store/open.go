@@ -60,14 +60,14 @@ func Open(opts Options) (*sql.DB, error) {
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("%s: %w", p, err)
 		}
 	}
 
 	if !opts.ReadOnly {
 		if err := initVec(db); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, err
 		}
 	}

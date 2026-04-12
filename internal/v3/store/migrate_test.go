@@ -17,7 +17,7 @@ func TestMigrateFromEmptyDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Fresh DB: readSchemaVersion returns 0 (no config table yet),
 	// pending includes 0001_init.sql, apply it, schema_version → 1.
@@ -49,7 +49,7 @@ func TestSnapshotCreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := Migrate(db, ""); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -67,7 +67,7 @@ func TestSnapshotCreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open snapshot: %v", err)
 	}
-	defer snapDB.Close()
+	defer func() { _ = snapDB.Close() }()
 	var v string
 	if err := snapDB.QueryRow(`SELECT value FROM config WHERE key='schema_version'`).Scan(&v); err != nil {
 		t.Fatalf("snapshot schema_version: %v", err)

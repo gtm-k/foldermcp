@@ -25,13 +25,15 @@ func TestInstanceUUIDStable(t *testing.T) {
 	if first == "" {
 		t.Fatal("first uuid empty")
 	}
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatalf("close before reopen: %v", err)
+	}
 
 	db2, err := Open(Options{Path: p, Tier: TierMid})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer db2.Close()
+	defer func() { _ = db2.Close() }()
 	second, err := ensureInstanceUUID(db2)
 	if err != nil {
 		t.Fatalf("second uuid: %v", err)
@@ -43,8 +45,11 @@ func TestInstanceUUIDStable(t *testing.T) {
 
 func TestInstanceUUIDReturnsExistingOnRepeatedCall(t *testing.T) {
 	tmp := t.TempDir()
-	db, _ := Open(Options{Path: filepath.Join(tmp, "u2.db"), Tier: TierMid})
-	defer db.Close()
+	db, err := Open(Options{Path: filepath.Join(tmp, "u2.db"), Tier: TierMid})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
 	if err := Migrate(db, ""); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

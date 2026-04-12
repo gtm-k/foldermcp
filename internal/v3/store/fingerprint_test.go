@@ -15,7 +15,7 @@ func TestFingerprintRoundtripAndMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mfs, _ := MigrationFiles()
 	raw, _ := fs.ReadFile(mfs, "0001_init.sql")

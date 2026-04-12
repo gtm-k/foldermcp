@@ -32,17 +32,17 @@ install:
 
 .PHONY: v3-build v3-test v3-lint v3-proto
 
-## v3-build: Compile the v3 indexer daemon (cgo required)
+## v3-build: Compile the v3 indexer daemon (cgo required + mattn sqlite_fts5)
 v3-build:
-	CGO_ENABLED=1 $(GO) build -tags cgo -o $(BUILD_DIR)/foldermcp-v3 $(CMD_DIR)
+	CGO_ENABLED=1 $(GO) build -tags "cgo sqlite_fts5" -o $(BUILD_DIR)/foldermcp-v3 $(CMD_DIR)
 
-## v3-test: Run v3 tests with race detection (cgo required)
+## v3-test: Run v3 tests with race detection (cgo + sqlite_fts5 for FTS5 virtual tables)
 v3-test:
-	CGO_ENABLED=1 $(GO) test -race -tags cgo ./internal/v3/...
+	CGO_ENABLED=1 $(GO) test -race -tags "cgo sqlite_fts5" ./internal/v3/...
 
-## v3-lint: Run golangci-lint over the v3 subtree (cgo build tags)
+## v3-lint: Run golangci-lint over the v3 subtree (cgo + sqlite_fts5 tags)
 v3-lint:
-	golangci-lint run --build-tags cgo ./internal/v3/...
+	golangci-lint run --build-tags "cgo,sqlite_fts5" ./internal/v3/...
 
 ## v3-proto: Regenerate v3 protobuf stubs
 v3-proto:

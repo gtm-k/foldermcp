@@ -15,7 +15,7 @@ func TestOpenAppliesPragmas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var mode string
 	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
@@ -40,7 +40,7 @@ func TestOpenLoadsSqliteVec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// vec_version() is a function exported by sqlite-vec
 	var version string

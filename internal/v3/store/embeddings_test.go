@@ -52,12 +52,14 @@ func TestVec0TableCreated(t *testing.T) {
 		t.Fatalf("embedding insert: %v", err)
 	}
 
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatalf("close before reopen: %v", err)
+	}
 	db2, err := Open(Options{Path: dbPath, Tier: TierMid})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer db2.Close()
+	defer func() { _ = db2.Close() }()
 
 	var got []byte
 	if err := db2.QueryRow(`SELECT embedding FROM embeddings WHERE chunk_id=1`).Scan(&got); err != nil {
