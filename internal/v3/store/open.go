@@ -12,6 +12,16 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// init registers sqlite-vec as an auto-extension so every subsequent
+// SQLite3 connection opened anywhere in this process loads it. The
+// sqlite-vec-go-bindings library exposes Auto() rather than a per-
+// connection LoadExtension() because it wires into SQLite's
+// sqlite3_auto_extension() hook, not the per-db extension loader. One
+// call is sufficient for the lifetime of the process.
+func init() {
+	sqlitevec.Auto()
+}
+
 type Options struct {
 	Path     string
 	Tier     Tier
@@ -20,6 +30,8 @@ type Options struct {
 
 // Open returns a *sql.DB with FTS5 available and sqlite-vec loaded.
 // It applies the tier's PRAGMA profile and foreign_keys=ON.
+// sqlite-vec is registered as an auto-extension at package init time,
+// so every new connection opened here has it loaded.
 func Open(opts Options) (*sql.DB, error) {
 	dsn := opts.Path
 	if opts.ReadOnly {
@@ -28,11 +40,6 @@ func Open(opts Options) (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open: %w", err)
-	}
-
-	if err := sqlitevec.LoadExtension(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("load sqlite-vec: %w", err)
 	}
 
 	prof, ok := pragmaProfiles[opts.Tier]
