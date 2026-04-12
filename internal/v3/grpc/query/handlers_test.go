@@ -9,12 +9,6 @@ import (
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 )
 
-// seedBasicFixture inserts one file/node/chunk into db for handler tests.
-func seedBasicFixture(t *testing.T, db interface{ Exec(string, ...any) (interface{}, error) }) {
-	t.Helper()
-	// Use the *sql.DB directly via the test helper
-}
-
 func TestFilenameSearchFindsMatch(t *testing.T) {
 	db := openTestDB(t)
 	mustExec(t, db, `INSERT INTO files(path,sha256,size,mtime,mime,content_class,parent_dir,last_seen)
