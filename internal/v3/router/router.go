@@ -44,7 +44,9 @@ func (r *Router) Search(ctx context.Context, args SearchArgs) (*SearchResult, er
 	if err != nil {
 		return nil, err
 	}
-	return searchResultFromProto(resp), nil
+	out := searchResultFromProto(resp)
+	AnnotateCompleteness(out)
+	return out, nil
 }
 
 // Inspect marshals the MCP foldermcp_inspect args into an InspectNode RPC.
