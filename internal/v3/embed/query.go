@@ -1,0 +1,30 @@
+//go:build cgo
+
+package embed
+
+import "fmt"
+
+// EmbedQuery tokenizes text, runs the ONNX model for batch=1,
+// mean-pools + L2-normalizes, quantizes to int8, and returns 384 bytes.
+// Called by SearchBroadly (Phase E) and by the retrieval harness (Phase G).
+func (e *Embedder) EmbedQuery(text string) ([]byte, error) {
+	tok, err := LoadTokenizer(e.tokenizerPath)
+	if err != nil {
+		return nil, fmt.Errorf("load tokenizer: %w", err)
+	}
+	ids, mask, tts := tok.Encode(text)
+
+	pooled, err := e.Embed(ids, mask, tts)
+	if err != nil {
+		return nil, fmt.Errorf("embed: %w", err)
+	}
+	if len(pooled) != Dimension {
+		return nil, fmt.Errorf("unexpected output dimension: %d", len(pooled))
+	}
+	quant := QuantizeInt8(pooled)
+	blob := make([]byte, Dimension)
+	for i, v := range quant {
+		blob[i] = byte(v)
+	}
+	return blob, nil
+}

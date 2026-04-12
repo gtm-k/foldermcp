@@ -49,3 +49,11 @@ v3-proto:
 	protoc --go_out=. --go_opt=paths=source_relative \
 	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
 	       internal/v3/proto/foldermcp.proto
+
+V3_MODEL_DIR=internal/v3/embed/model
+
+## v3-fetch-model: Download all-MiniLM-L6-v2 ONNX model and tokenizer
+v3-fetch-model:
+	mkdir -p $(V3_MODEL_DIR)
+	test -f $(V3_MODEL_DIR)/model.onnx || curl -L -o $(V3_MODEL_DIR)/model.onnx https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+	test -f $(V3_MODEL_DIR)/tokenizer.json || curl -L -o $(V3_MODEL_DIR)/tokenizer.json https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
