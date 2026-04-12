@@ -5,6 +5,8 @@ import (
 
 	"github.com/gtm-k/foldermcp/internal/v3/router"
 	"github.com/mark3labs/mcp-go/mcp"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func (s *Shim) registerTools() {
@@ -110,10 +112,22 @@ func (s *Shim) handleBrowse(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	return mcp.NewToolResultJSON(res)
 }
 
-// sanitizeError strips internal details (SQL, gRPC metadata) from errors
-// before surfacing them to the LLM. Only the status code message is kept.
+// sanitizeError maps gRPC status codes to actionable LLM-safe messages.
+// Never returns raw err.Error() — prevents leaking SQL/embedder internals.
 func sanitizeError(err error) string {
-	// gRPC status errors already have sanitized messages from the server.
-	// For safety, return a generic message rather than raw err.Error().
+	if s, ok := status.FromError(err); ok {
+		switch s.Code() {
+		case codes.NotFound:
+			return "not found"
+		case codes.InvalidArgument:
+			return "invalid request"
+		case codes.DeadlineExceeded:
+			return "request timed out"
+		case codes.Unavailable:
+			return "service unavailable"
+		default:
+			return "service unavailable"
+		}
+	}
 	return "service unavailable"
 }

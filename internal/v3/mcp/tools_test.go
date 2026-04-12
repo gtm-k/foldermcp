@@ -1,10 +1,11 @@
 package mcp
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/server"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestToolDefinitions(t *testing.T) {
@@ -41,18 +42,21 @@ func TestSanitizeError(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
+		want string
 	}{
-		{"simple", errors.New("connection refused")},
-		{"with_sql", errors.New("SQL: SELECT * FROM nodes WHERE id = 42")},
-		{"nil_wrapped", errors.New("rpc error: code = Internal desc = embedder crashed")},
+		{"not_found", status.Error(codes.NotFound, "node 42 missing from db"), "not found"},
+		{"invalid_arg", status.Error(codes.InvalidArgument, "bad query"), "invalid request"},
+		{"deadline", status.Error(codes.DeadlineExceeded, "ctx done"), "request timed out"},
+		{"unavailable", status.Error(codes.Unavailable, "conn refused"), "service unavailable"},
+		{"internal", status.Error(codes.Internal, "SQL panic"), "service unavailable"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := sanitizeError(tt.err)
-			if got == "" {
-				t.Error("sanitizeError returned empty string")
+			if got != tt.want {
+				t.Errorf("sanitizeError(%v) = %q, want %q", tt.err, got, tt.want)
 			}
-			// Must not leak internal details.
+			// Must never contain the raw message.
 			if got == tt.err.Error() {
 				t.Errorf("sanitizeError leaked raw error: %s", got)
 			}
