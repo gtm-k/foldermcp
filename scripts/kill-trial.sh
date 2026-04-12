@@ -93,18 +93,22 @@ for trial_spec in "${TRIALS[@]}"; do
         continue
     fi
 
-    # Resume indexing to verify the indexer can recover and complete
-    if ! FOLDERMCP_STORE="${STORE}" timeout 120 "${BIN}" index "${FIXTURE}" 2>&1; then
-        # timeout exits 124 if the command timed out — that's OK for the indexer
-        # (it runs indefinitely in watch mode). Check if it was a timeout vs error.
-        EXIT_CODE=$?
-        if [ "${EXIT_CODE}" -eq 124 ]; then
-            echo "    resumed (timed out after 120s — expected for watch mode)"
-        else
-            echo "    ❌ FAIL: resume indexing failed with exit code ${EXIT_CODE}"
-            FAILED=$((FAILED + 1))
-            continue
-        fi
+    # Resume indexing to verify the indexer can recover and complete.
+    # The indexer runs in watch mode (never exits on its own), so timeout
+    # returning 124 is expected. We capture $? directly because `if !`
+    # clobbers it to 0 inside the then-block.
+    set +e
+    FOLDERMCP_STORE="${STORE}" timeout 120 "${BIN}" index "${FIXTURE}" 2>&1
+    EXIT_CODE=$?
+    set -e
+
+    if [ "${EXIT_CODE}" -ne 0 ] && [ "${EXIT_CODE}" -ne 124 ]; then
+        echo "    ❌ FAIL: resume indexing failed with exit code ${EXIT_CODE}"
+        FAILED=$((FAILED + 1))
+        continue
+    fi
+    if [ "${EXIT_CODE}" -eq 124 ]; then
+        echo "    resumed (timed out after 120s — expected for watch mode)"
     fi
 
     # Final health check after recovery
