@@ -9,6 +9,8 @@ import (
 	"time"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // FilenameHandler searches files.path via case-insensitive substring matching.
@@ -57,18 +59,18 @@ LIMIT ?`
 		var fileID, nodeID int64
 		var plen int
 		if err := rows.Scan(&fileID, &nodeID, &plen); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "filename: %v", err)
 		}
 		score := float32(1.0 / (1.0 + float32(plen)/64.0))
 		resp.Results = append(resp.Results, &pb.ScoredNode{NodeId: nodeID, Score: score})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "filename rows: %v", err)
 	}
 
 	if req.Hydrate != nil {
 		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "filename: %v", err)
 		}
 	}
 

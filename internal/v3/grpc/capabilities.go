@@ -40,7 +40,7 @@ func (h *CapabilitiesHandler) GetCapabilities(ctx context.Context, _ *pb.GetCapa
 			"IndexQuery.VectorSearch", "IndexQuery.FTSSearch", "IndexQuery.FilenameSearch",
 			"IndexQuery.MetadataSearch", "IndexQuery.GraphExpand", "IndexQuery.GetNodes",
 			"IndexQuery.GetChunks", "IndexQuery.GetBlob", "IndexQuery.Batch",
-			"IndexTools.SearchBroadly", "IndexTools.InspectNode", "IndexTools.BrowseFolder",
+			// IndexTools RPCs omitted until Phase E implements them
 			"IndexAdmin.Status", "IndexAdmin.Health",
 			"IndexCapabilities.GetCapabilities",
 		},

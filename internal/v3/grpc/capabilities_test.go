@@ -33,8 +33,8 @@ func TestGetCapabilitiesReflectsSchemaVersion(t *testing.T) {
 	if resp.WireVersion != 1 {
 		t.Errorf("wire_version = %d", resp.WireVersion)
 	}
-	if len(resp.RpcsSupported) < 10 {
-		t.Errorf("expected 10+ rpcs, got %d", len(resp.RpcsSupported))
+	if len(resp.RpcsSupported) < 11 {
+		t.Errorf("expected 11+ rpcs, got %d", len(resp.RpcsSupported))
 	}
 	if resp.ServerVersion != "v3.0.0-m1" {
 		t.Errorf("server_version = %s", resp.ServerVersion)

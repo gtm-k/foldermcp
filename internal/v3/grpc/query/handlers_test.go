@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestFilenameSearchFindsMatch(t *testing.T) {
@@ -122,14 +124,19 @@ func TestGraphExpandReturnsStub(t *testing.T) {
 	}
 }
 
-func TestGetBlobEmptyInM1(t *testing.T) {
+func TestGetBlobNotFoundInM1(t *testing.T) {
 	db := openTestDB(t)
 	h := &BlobsHandler{DB: db}
-	resp, err := h.Get(context.Background(), &pb.GetBlobRequest{BlobId: 999})
-	if err != nil {
-		t.Fatal(err)
+	_, err := h.Get(context.Background(), &pb.GetBlobRequest{BlobId: 999})
+	if err == nil {
+		t.Fatal("expected NOT_FOUND error for missing blob")
 	}
-	if resp.Mime != "" {
-		t.Errorf("expected empty blob response in M1, got mime=%s", resp.Mime)
+	// Verify it's a gRPC NOT_FOUND status
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got %T: %v", err, err)
+	}
+	if st.Code() != codes.NotFound {
+		t.Errorf("code = %v, want NotFound", st.Code())
 	}
 }

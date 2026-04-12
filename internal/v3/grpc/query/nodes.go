@@ -8,6 +8,8 @@ import (
 	"fmt"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // NodesHandler implements GetNodes — fetch specific nodes by ID.
@@ -39,7 +41,7 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 
 	rows, err := h.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "get_nodes query: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -48,7 +50,7 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 		n := &pb.HydratedNode{}
 		if err := rows.Scan(&n.NodeId, &n.FileId, &n.Path, &n.NodeType, &n.Name,
 			&n.ContentClass, &n.Language, &n.Provenance, &n.Confidence, &n.PropertiesJson); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "get_nodes scan: %v", err)
 		}
 		resp.Nodes = append(resp.Nodes, n)
 	}
@@ -62,11 +64,14 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 		for _, n := range resp.Nodes {
 			chunks, err := fetchTopChunks(ctx, h.DB, n.NodeId, chunksPerNode)
 			if err != nil {
-				return nil, err
+				return nil, status.Errorf(codes.Internal, "get_nodes hydrate: %v", err)
 			}
 			n.Chunks = chunks
 		}
 	}
 
-	return resp, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, status.Errorf(codes.Internal, "get_nodes rows: %v", err)
+	}
+	return resp, nil
 }

@@ -7,6 +7,8 @@ import (
 	"fmt"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // BatchHandler dispatches individual ops to their handlers, capturing
@@ -27,7 +29,7 @@ const (
 
 func (h *BatchHandler) Batch(ctx context.Context, req *pb.BatchRequest) (*pb.BatchResponse, error) {
 	if len(req.Ops) > MaxBatchOps {
-		return nil, fmt.Errorf("batch: %d ops exceeds max %d", len(req.Ops), MaxBatchOps)
+		return nil, status.Errorf(codes.InvalidArgument, "batch: %d ops exceeds max %d", len(req.Ops), MaxBatchOps)
 	}
 	out := &pb.BatchResponse{}
 	for _, op := range req.Ops {

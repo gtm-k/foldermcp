@@ -10,6 +10,8 @@ import (
 	"time"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // MetadataHandler searches nodes filtered by content_class, path_prefix, and mtime range.
@@ -64,7 +66,7 @@ LIMIT ?`, strings.Join(conditions, " AND "))
 	for rows.Next() {
 		var nodeID, mtime int64
 		if err := rows.Scan(&nodeID, &mtime); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "metadata: %v", err)
 		}
 		resp.Results = append(resp.Results, &pb.ScoredNode{
 			NodeId: nodeID,
@@ -72,12 +74,12 @@ LIMIT ?`, strings.Join(conditions, " AND "))
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "metadata rows: %v", err)
 	}
 
 	if req.Hydrate != nil {
 		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "metadata: %v", err)
 		}
 	}
 

@@ -8,6 +8,8 @@ import (
 	"fmt"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // hydrateNodes fills HydratedNode on each ScoredNode per the hint.
@@ -32,7 +34,7 @@ FROM nodes n JOIN files f ON f.file_id = n.file_id
 WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 	rows, err := db.QueryContext(ctx, q, ids...)
 	if err != nil {
-		return err
+		return status.Errorf(codes.Internal, "hydrate query: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -41,7 +43,7 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 		h := &pb.HydratedNode{}
 		if err := rows.Scan(&h.NodeId, &h.FileId, &h.Path, &h.NodeType, &h.Name,
 			&h.ContentClass, &h.Language, &h.Provenance, &h.Confidence, &h.PropertiesJson); err != nil {
-			return err
+			return status.Errorf(codes.Internal, "hydrate scan: %v", err)
 		}
 		nodeByID[h.NodeId] = h
 	}

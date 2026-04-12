@@ -5,10 +5,11 @@ package query
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"time"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // FTSHandler implements FTSSearch against the chunks_fts FTS5 virtual table.
@@ -63,7 +64,7 @@ LIMIT ?`, req.Query, k)
 
 	if req.Hydrate != nil {
 		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate); err != nil {
-			return nil, fmt.Errorf("hydrate: %w", err)
+			return nil, status.Errorf(codes.Internal, "hydrate: %v", err)
 		}
 	}
 

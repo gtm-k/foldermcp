@@ -9,6 +9,8 @@ import (
 	"time"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // VectorHandler implements VectorSearch using sqlite-vec brute-force KNN.
@@ -51,7 +53,7 @@ WHERE e.embedding MATCH vec_int8(?)
 		var chunkID, nodeID int64
 		var distance float64
 		if err := rows.Scan(&chunkID, &nodeID, &distance); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "vector scan: %v", err)
 		}
 		// Convert distance (lower=closer) to score (higher=better).
 		score := float32(1.0 / (1.0 + distance))
@@ -69,7 +71,7 @@ WHERE e.embedding MATCH vec_int8(?)
 
 	if req.Hydrate != nil {
 		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate); err != nil {
-			return nil, err
+			return nil, status.Errorf(codes.Internal, "hydrate: %v", err)
 		}
 	}
 
