@@ -1,0 +1,26 @@
+# .dockerignore — keep the Docker build context lean
+#
+# The full QA workspace (~10 GB) must NOT enter the build context.
+# The micro-fixture (~100 MB) is included for in-container testing.
+
+.git
+.github
+bin/
+dist/
+testdata/v3/qa-workspace
+*.test
+coverage.out
+*.exe
+bash.exe.stackdump
+qa-workspace/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

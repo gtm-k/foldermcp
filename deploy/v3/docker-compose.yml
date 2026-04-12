@@ -1,0 +1,34 @@
+# docker-compose.yml — FolderMCP v3 development/testing
+#
+# Usage:
+#   docker compose -f deploy/v3/docker-compose.yml up
+#
+# Mounts:
+#   - ./workspace (or WORKSPACE_PATH) as the read-only workspace
+#   - ./store (or STORE_PATH) as the persistent index store
+
+services:
+  foldermcp:
+    build:
+      context: ../..
+      dockerfile: deploy/v3/Dockerfile
+      platforms:
+        - linux/amd64
+    image: foldermcp:v3-m1
+    volumes:
+      - ${WORKSPACE_PATH:-./workspace}:/workspace:ro
+      - ${STORE_PATH:-./store}:/store
+    environment:
+      - FOLDERMCP_STORE=/store
+    # The all-v3 command is the default CMD in the Dockerfile
+    restart: unless-stopped
+
+  # Smoke test: run and exit with status code
+  smoke-test:
+    build:
+      context: ../..
+      dockerfile: deploy/v3/Dockerfile
+    image: foldermcp:v3-m1
+    command: ["--help"]
+    profiles:
+      - test
