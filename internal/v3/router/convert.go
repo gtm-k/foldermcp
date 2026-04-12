@@ -1,10 +1,34 @@
 package router
 
 import (
+	"strings"
+
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 )
 
 // ── Proto → JSON conversion helpers ────────────────────────
+
+// sanitizeSourceError replaces raw internal error messages with generic
+// descriptions safe for MCP clients. Prevents leaking SQL, embedder, or
+// filesystem internals through per-source error_message fields.
+func sanitizeSourceError(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "sql") || strings.Contains(lower, "sqlite"):
+		return "database query failed"
+	case strings.Contains(lower, "embed"):
+		return "embedding operation failed"
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline"):
+		return "operation timed out"
+	case strings.Contains(lower, "connect") || strings.Contains(lower, "refused"):
+		return "service connection failed"
+	default:
+		return "internal error"
+	}
+}
 
 func searchResultFromProto(p *pb.SearchBroadlyResponse) *SearchResult {
 	if p == nil {
@@ -25,7 +49,7 @@ func searchResultFromProto(p *pb.SearchBroadlyResponse) *SearchResult {
 			SourceName:   s.SourceName,
 			Status:       s.Status,
 			LatencyMs:    s.LatencyMs,
-			ErrorMessage: s.ErrorMessage,
+			ErrorMessage: sanitizeSourceError(s.ErrorMessage),
 		})
 	}
 	for _, h := range p.Results {

@@ -35,7 +35,9 @@ func NewShim(ctx context.Context) (*Shim, error) {
 	}
 
 	r := router.New(conn)
-	s := server.NewMCPServer("foldermcp-v3", "v3.0.0-m1")
+	s := server.NewMCPServer("foldermcp-v3", "v3.0.0-m1",
+		server.WithRecovery(),
+	)
 
 	shim := &Shim{router: r, server: s, conn: conn}
 	shim.registerTools()
