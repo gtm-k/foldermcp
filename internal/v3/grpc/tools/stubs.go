@@ -1,8 +1,6 @@
 //go:build cgo
 
 // Package tools contains high-level IndexTools RPC handlers.
-// Full implementations arrive in Phase E; these stubs let the
-// server assembly compile and pass UNIMPLEMENTED to callers.
 package tools
 
 import (
@@ -16,17 +14,14 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// SearchBroadlyHandler will implement staged retrieval + RRF fusion in Phase E.
+// SearchBroadlyHandler implements staged retrieval + RRF fusion.
+// Implementation in search_broadly.go.
 type SearchBroadlyHandler struct {
 	DB       *sql.DB
 	Vector   *query.VectorHandler
 	FTS      *query.FTSHandler
 	Filename *query.FilenameHandler
 	Embedder *embed.Embedder
-}
-
-func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.SearchBroadlyRequest) (*pb.SearchBroadlyResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "SearchBroadly: Phase E stub")
 }
 
 // InspectHandler will implement node inspection in Phase E.
