@@ -146,3 +146,23 @@ func TestContainsSource(t *testing.T) {
 		t.Error("vector not in sources")
 	}
 }
+
+func TestSourceExecutedOK(t *testing.T) {
+	sources := []*pb.SourceStatus{
+		{SourceName: "fts", Status: "OK"},
+		{SourceName: "filename", Status: "EMPTY_BUT_EXECUTED"},
+		{SourceName: "vector", Status: "DEGRADED"},
+	}
+	if !sourceExecutedOK(sources, "fts") {
+		t.Error("fts OK should count as executed")
+	}
+	if !sourceExecutedOK(sources, "filename") {
+		t.Error("filename EMPTY_BUT_EXECUTED should count as executed")
+	}
+	if sourceExecutedOK(sources, "vector") {
+		t.Error("vector DEGRADED should NOT count as executed")
+	}
+	if sourceExecutedOK(sources, "missing") {
+		t.Error("missing source should NOT count as executed")
+	}
+}
