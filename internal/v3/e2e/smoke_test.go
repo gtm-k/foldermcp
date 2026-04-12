@@ -271,13 +271,16 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 	}
 
 	// ── Step 2c: Call foldermcp_inspect ──────────────────
+	// The inspect tool requires a node_id (integer) from a prior search result.
+	// Parse the search response to extract one; fall back to node_id=1 if parsing fails.
+	nodeID := extractNodeID(t, searchResp)
 	inspectResp := sendJSONRPC(t, mcpStdin, scanner, jsonRPCRequest{
 		JSONRPC: "2.0",
 		ID:      3,
 		Method:  "tools/call",
 		Params: map[string]interface{}{
 			"name":      "foldermcp_inspect",
-			"arguments": map[string]string{"path": "code-python/session_manager.py"},
+			"arguments": map[string]interface{}{"node_id": nodeID},
 		},
 	})
 	if inspectResp.Error != nil {
@@ -319,4 +322,55 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "...(truncated)"
+}
+
+// extractNodeID attempts to parse a node_id from an MCP search tool response.
+// The response Result contains a JSON array of content blocks; we look for
+// "node_id" in the text content. Falls back to 1 if parsing fails.
+func extractNodeID(t *testing.T, resp jsonRPCResponse) int {
+	t.Helper()
+	if resp.Error != nil || resp.Result == nil {
+		t.Log("extractNodeID: no result to parse, falling back to node_id=1")
+		return 1
+	}
+
+	// MCP tool results are: {"content": [{"type":"text","text":"..."}]}
+	var toolResult struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(resp.Result, &toolResult); err != nil {
+		t.Logf("extractNodeID: unmarshal failed: %v, falling back to node_id=1", err)
+		return 1
+	}
+
+	// Search the text content for a node_id field in JSON
+	for _, c := range toolResult.Content {
+		// Try to find "node_id": <number> in the text
+		var results []map[string]interface{}
+		if err := json.Unmarshal([]byte(c.Text), &results); err == nil {
+			for _, r := range results {
+				if id, ok := r["node_id"]; ok {
+					if idFloat, ok := id.(float64); ok && idFloat > 0 {
+						t.Logf("extractNodeID: found node_id=%d", int(idFloat))
+						return int(idFloat)
+					}
+				}
+			}
+		}
+		// Also try as a single object
+		var single map[string]interface{}
+		if err := json.Unmarshal([]byte(c.Text), &single); err == nil {
+			if id, ok := single["node_id"]; ok {
+				if idFloat, ok := id.(float64); ok && idFloat > 0 {
+					t.Logf("extractNodeID: found node_id=%d", int(idFloat))
+					return int(idFloat)
+				}
+			}
+		}
+	}
+
+	t.Log("extractNodeID: no node_id found in search results, falling back to 1")
+	return 1
 }

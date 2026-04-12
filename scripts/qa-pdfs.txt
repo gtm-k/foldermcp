@@ -1,0 +1,11 @@
+# QA workspace — arXiv PDF list
+# Format: URL SHA256
+# These are open-access papers under permissive licenses (arXiv non-exclusive).
+# SHA256 is verified on download by scripts/build-qa-workspace.sh.
+#
+# TODO(M1): Populate with 20 real arXiv PDF URLs and their SHA256 hashes.
+# The papers should cover the topics in testdata/v3/labeled_queries.yaml
+# (researcher persona queries q011-q020).
+#
+# Example format:
+# https://arxiv.org/pdf/1706.03762v5 a]b2c3...sha256...

@@ -18,8 +18,12 @@ services:
     volumes:
       - ${WORKSPACE_PATH:-./workspace}:/workspace:ro
       - ${STORE_PATH:-./store}:/store
+      # Expose the Unix socket so the host MCP client can connect.
+      # all-v3 binds to $HOME/.foldermcp/run/serve.sock inside the container.
+      - ${SOCKET_PATH:-./run}:/home/foldermcp/.foldermcp/run
     environment:
       - FOLDERMCP_STORE=/store
+      - HOME=/home/foldermcp
     # The all-v3 command is the default CMD in the Dockerfile
     restart: unless-stopped
 

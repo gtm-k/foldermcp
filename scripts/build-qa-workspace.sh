@@ -10,13 +10,20 @@
 
 set -euo pipefail
 
-DEST="${1:-testdata/v3/qa-workspace}"
+# Resolve repo root: the directory containing go.mod, relative to this script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+DEST="${1:-${REPO_ROOT}/testdata/v3/qa-workspace}"
 MANIFEST="${DEST}/MANIFEST.yaml"
 
 if [ ! -f "${MANIFEST}" ]; then
     echo "ERROR: MANIFEST.yaml not found at ${MANIFEST}"
     exit 1
 fi
+
+# All relative paths in the manifest (generators, list files) resolve from REPO_ROOT.
+cd "${REPO_ROOT}"
 
 command -v yq >/dev/null 2>&1 || { echo "ERROR: yq is required but not installed. Install via: go install github.com/mikefarah/yq/v4@latest"; exit 1; }
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required but not installed."; exit 1; }

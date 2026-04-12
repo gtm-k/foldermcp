@@ -14,6 +14,14 @@ coverage.out
 bash.exe.stackdump
 qa-workspace/
 
+# Local state and secrets
+.foldermcp/
+.claude/
+.remember/
+test-reports/
+*.env
+.env.*
+
 # IDE and editor files
 .vscode/
 .idea/

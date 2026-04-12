@@ -208,6 +208,9 @@ queries:
       - path: docs-pdf/gnn-molecular-prediction.pdf
         symbol: null
         grade: 2
+      - path: docs-pdf/attention-is-all-you-need.pdf
+        symbol: null
+        grade: 0
 
   - id: q015
     text: "diffusion models for image generation mathematical foundations"
@@ -241,6 +244,9 @@ queries:
       - path: docs-pdf/lottery-ticket-hypothesis.pdf
         symbol: null
         grade: 2
+      - path: docs-pdf/distilbert-distilled-bert.pdf
+        symbol: null
+        grade: 1
 
   - id: q018
     text: "retrieval augmented generation architecture"
@@ -274,6 +280,9 @@ queries:
       - path: docs-pdf/distilbert-distilled-bert.pdf
         symbol: null
         grade: 2
+      - path: docs-pdf/gpt3-few-shot-learners.pdf
+        symbol: null
+        grade: 0
 
   # ──── Writer persona (8 queries) ──────────────────────
 
