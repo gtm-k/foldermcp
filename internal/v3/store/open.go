@@ -56,5 +56,25 @@ func Open(opts Options) (*sql.DB, error) {
 		}
 	}
 
+	if !opts.ReadOnly {
+		if err := initVec(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+
 	return db, nil
+}
+
+// initVec creates the vec0 virtual table for int8[384] embeddings.
+// Idempotent — safe on reopens. sqlite-vec must already be loaded
+// before this is called.
+func initVec(db *sql.DB) error {
+	const ddl = `
+CREATE VIRTUAL TABLE IF NOT EXISTS embeddings USING vec0(
+    chunk_id INTEGER PRIMARY KEY,
+    embedding int8[384]
+);`
+	_, err := db.Exec(ddl)
+	return err
 }
