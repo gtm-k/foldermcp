@@ -1,17 +1,14 @@
 //go:build cgo
 
 // Package tools contains high-level IndexTools RPC handlers.
+// Struct definitions live here; implementations in per-handler files.
 package tools
 
 import (
-	"context"
 	"database/sql"
 
-	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 	"github.com/gtm-k/foldermcp/internal/v3/embed"
 	"github.com/gtm-k/foldermcp/internal/v3/grpc/query"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // SearchBroadlyHandler implements staged retrieval + RRF fusion.
@@ -31,11 +28,8 @@ type InspectHandler struct {
 	Nodes *query.NodesHandler
 }
 
-// BrowseHandler will implement folder browsing in Phase E.
+// BrowseHandler implements folder browsing with cursor pagination.
+// Implementation in browse_folder.go.
 type BrowseHandler struct {
 	DB *sql.DB
-}
-
-func (h *BrowseHandler) Browse(ctx context.Context, req *pb.BrowseFolderRequest) (*pb.BrowseFolderResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "BrowseFolder: Phase E stub")
 }
