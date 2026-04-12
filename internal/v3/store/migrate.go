@@ -74,17 +74,25 @@ func Migrate(db *sql.DB, snapshotPath string) error {
 
 // readSchemaVersion returns 0 if the config table does not exist or has no
 // schema_version row, so a fresh DB successfully bootstraps via 0001_init.
+// Uses sqlite_master to detect table existence rather than matching driver
+// error strings, which would be fragile across SQLite versions.
 func readSchemaVersion(db *sql.DB) (int, error) {
+	var count int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='config'`,
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("check config table: %w", err)
+	}
+	if count == 0 {
+		return 0, nil
+	}
+
 	var s string
 	err := db.QueryRow(`SELECT value FROM config WHERE key='schema_version'`).Scan(&s)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
 	if err != nil {
-		// Table does not exist yet on a fresh DB — treat as version 0.
-		if strings.Contains(err.Error(), "no such table") {
-			return 0, nil
-		}
 		return 0, err
 	}
 	if s == "" {

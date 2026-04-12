@@ -4,7 +4,6 @@ package store
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 
 	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
@@ -29,7 +28,10 @@ type Options struct {
 }
 
 // Open returns a *sql.DB with FTS5 available and sqlite-vec loaded.
-// It applies the tier's PRAGMA profile and foreign_keys=ON.
+// The pool is pinned to a single connection (SetMaxOpenConns(1))
+// because SQLite PRAGMAs are per-connection state — without pinning,
+// a pooled *sql.DB could serve queries on connections that never had
+// foreign_keys=ON or journal_mode=WAL applied.
 // sqlite-vec is registered as an auto-extension at package init time,
 // so every new connection opened here has it loaded.
 func Open(opts Options) (*sql.DB, error) {
@@ -41,27 +43,41 @@ func Open(opts Options) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sql.Open: %w", err)
 	}
+	db.SetMaxOpenConns(1)
 
 	prof, ok := pragmaProfiles[opts.Tier]
 	if !ok {
 		prof = pragmaProfiles[TierMid]
 	}
 
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA synchronous=NORMAL",
+	// Read-safe PRAGMAs applied on every open (including read-only).
+	readPragmas := []string{
 		"PRAGMA foreign_keys=ON",
-		"PRAGMA auto_vacuum=INCREMENTAL",
 		"PRAGMA temp_store=MEMORY",
-		"PRAGMA wal_autocheckpoint=1000",
 		fmt.Sprintf("PRAGMA mmap_size=%d", prof.MmapSize),
 		fmt.Sprintf("PRAGMA cache_size=%d", prof.CacheSizePages),
-		fmt.Sprintf("PRAGMA journal_size_limit=%d", prof.JournalSizeLimit),
 	}
-	for _, p := range pragmas {
+	for _, p := range readPragmas {
 		if _, err := db.Exec(p); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("%s: %w", p, err)
+		}
+	}
+
+	// Write-mode PRAGMAs that change file format or affect WAL behavior.
+	if !opts.ReadOnly {
+		writePragmas := []string{
+			"PRAGMA journal_mode=WAL",
+			"PRAGMA synchronous=NORMAL",
+			"PRAGMA auto_vacuum=INCREMENTAL",
+			"PRAGMA wal_autocheckpoint=1000",
+			fmt.Sprintf("PRAGMA journal_size_limit=%d", prof.JournalSizeLimit),
+		}
+		for _, p := range writePragmas {
+			if _, err := db.Exec(p); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("%s: %w", p, err)
+			}
 		}
 	}
 
@@ -88,22 +104,24 @@ CREATE VIRTUAL TABLE IF NOT EXISTS embeddings USING vec0(
 	return err
 }
 
-// ensureInstanceUUID reads the instance_uuid from config; if blank,
-// generates a fresh v4 UUID, persists it, and returns it. Idempotent —
-// subsequent calls return the same UUID for the lifetime of the store.
-// Callers must invoke this after Migrate() so the config table exists.
+// ensureInstanceUUID atomically populates the instance_uuid config row
+// if it is blank, then returns whatever value persisted. Safe against
+// concurrent callers: the UPDATE only modifies the row if value is still
+// empty, so at most one caller's UUID wins; all callers read back the
+// winner. Callers must invoke this after Migrate() so the config table
+// exists.
 func ensureInstanceUUID(db *sql.DB) (string, error) {
-	var existing string
-	err := db.QueryRow(`SELECT value FROM config WHERE key='instance_uuid'`).Scan(&existing)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-	if existing != "" {
-		return existing, nil
-	}
 	id := uuid.NewString()
-	if _, err := db.Exec(`INSERT OR REPLACE INTO config(key,value) VALUES('instance_uuid', ?)`, id); err != nil {
-		return "", err
+	if _, err := db.Exec(
+		`UPDATE config SET value=? WHERE key='instance_uuid' AND value=''`, id,
+	); err != nil {
+		return "", fmt.Errorf("ensureInstanceUUID update: %w", err)
 	}
-	return id, nil
+	var result string
+	if err := db.QueryRow(
+		`SELECT value FROM config WHERE key='instance_uuid'`,
+	).Scan(&result); err != nil {
+		return "", fmt.Errorf("ensureInstanceUUID read: %w", err)
+	}
+	return result, nil
 }
