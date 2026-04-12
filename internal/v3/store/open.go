@@ -4,9 +4,11 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	sqlitevec "github.com/asg017/sqlite-vec-go-bindings/cgo"
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -77,4 +79,24 @@ CREATE VIRTUAL TABLE IF NOT EXISTS embeddings USING vec0(
 );`
 	_, err := db.Exec(ddl)
 	return err
+}
+
+// ensureInstanceUUID reads the instance_uuid from config; if blank,
+// generates a fresh v4 UUID, persists it, and returns it. Idempotent —
+// subsequent calls return the same UUID for the lifetime of the store.
+// Callers must invoke this after Migrate() so the config table exists.
+func ensureInstanceUUID(db *sql.DB) (string, error) {
+	var existing string
+	err := db.QueryRow(`SELECT value FROM config WHERE key='instance_uuid'`).Scan(&existing)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	id := uuid.NewString()
+	if _, err := db.Exec(`INSERT OR REPLACE INTO config(key,value) VALUES('instance_uuid', ?)`, id); err != nil {
+		return "", err
+	}
+	return id, nil
 }
