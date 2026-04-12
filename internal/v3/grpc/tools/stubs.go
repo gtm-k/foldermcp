@@ -24,14 +24,11 @@ type SearchBroadlyHandler struct {
 	Embedder *embed.Embedder
 }
 
-// InspectHandler will implement node inspection in Phase E.
+// InspectHandler implements node inspection.
+// Implementation in inspect_node.go.
 type InspectHandler struct {
 	DB    *sql.DB
 	Nodes *query.NodesHandler
-}
-
-func (h *InspectHandler) Inspect(ctx context.Context, req *pb.InspectNodeRequest) (*pb.InspectNodeResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "InspectNode: Phase E stub")
 }
 
 // BrowseHandler will implement folder browsing in Phase E.
