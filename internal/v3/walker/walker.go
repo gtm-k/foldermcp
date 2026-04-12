@@ -21,6 +21,11 @@ type Options struct {
 // Walk enumerates Root and upserts one row per file into the files table.
 // Returns the number of files visited and any error. Directories matching
 // common VCS/build patterns (.git, node_modules, etc.) are skipped.
+//
+// Note: Walk does not mark disappeared files as deleted (deleted_at).
+// Deletion detection is a separate concern handled by the pipeline
+// orchestrator (Phase C pipeline.go), which compares last_seen against
+// the current run's timestamp after the walk completes.
 func Walk(ctx context.Context, db *sql.DB, opts Options) (int, error) {
 	if opts.BatchSize == 0 {
 		opts.BatchSize = 100

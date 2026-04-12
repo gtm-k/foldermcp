@@ -12,6 +12,13 @@ import (
 // tokenizer.json shipped with all-MiniLM-L6-v2. It supports Encode(text)
 // returning (input_ids, attention_mask, token_type_ids) padded/truncated
 // to MaxSeqLen=128.
+//
+// M1 limitation: this is a simplified implementation that lowercases and
+// splits on whitespace, then applies WordPiece. It does not implement the
+// full HuggingFace tokenizer pipeline (normalizer, pre-tokenizer, post-
+// processing). Embedding quality is measured by the G39 retrieval harness;
+// a production-grade tokenizer library (e.g. tokenizers-go) is M2 scope
+// if G5 fails on retrieval quality.
 type Tokenizer struct {
 	vocab     map[string]int64
 	clsID     int64

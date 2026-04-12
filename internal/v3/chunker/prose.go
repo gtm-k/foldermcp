@@ -4,6 +4,7 @@ package chunker
 
 import (
 	"strings"
+	"unicode/utf8"
 )
 
 // ProseChunk represents a text chunk with byte offsets relative to the
@@ -57,9 +58,13 @@ func recursiveSplit(text string, offset int, seps []string, cfg Config, c Counte
 	}
 	if len(seps) == 0 {
 		// Hard-cut by byte length proportional to token count.
+		// Align to a UTF-8 rune boundary to avoid splitting mid-rune.
 		cut := len(text) * cfg.TargetTokens / toks
 		if cut < 1 {
 			cut = 1
+		}
+		for cut < len(text) && !utf8.RuneStart(text[cut]) {
+			cut++
 		}
 		left := text[:cut]
 		right := text[cut:]

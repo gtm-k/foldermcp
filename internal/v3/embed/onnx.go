@@ -17,6 +17,21 @@ const (
 	MaxSeqLen    = 128
 )
 
+// ortEnvOnce guards the process-wide ONNX Runtime environment init.
+// InitializeEnvironment() errors if called twice in the same process,
+// so all Embedder instances share a single init.
+var (
+	ortEnvOnce sync.Once
+	ortEnvErr  error
+)
+
+func initOrtEnv() error {
+	ortEnvOnce.Do(func() {
+		ortEnvErr = ort.InitializeEnvironment()
+	})
+	return ortEnvErr
+}
+
 // Embedder wraps an ONNX Runtime session for all-MiniLM-L6-v2 inference.
 // It pre-allocates input/output tensors and reuses them across calls.
 // Not goroutine-safe — callers must serialize access (the pipeline is
@@ -39,7 +54,7 @@ func NewEmbedder(modelPath, tokenizerPath string) *Embedder {
 
 func (e *Embedder) init() error {
 	e.once.Do(func() {
-		if err := ort.InitializeEnvironment(); err != nil {
+		if err := initOrtEnv(); err != nil {
 			e.initErr = fmt.Errorf("ort init: %w", err)
 			return
 		}
@@ -90,9 +105,14 @@ func (e *Embedder) init() error {
 
 // Embed runs inference on pre-tokenized inputs (batch=1) and returns
 // a 384-dim float32 vector after mean-pooling and L2 normalization.
+// All three input slices must be exactly MaxSeqLen (128) elements.
 func (e *Embedder) Embed(ids, mask, tts []int64) ([]float32, error) {
 	if err := e.init(); err != nil {
 		return nil, err
+	}
+	if len(ids) != MaxSeqLen || len(mask) != MaxSeqLen || len(tts) != MaxSeqLen {
+		return nil, fmt.Errorf("input length mismatch: ids=%d mask=%d tts=%d, all must be %d",
+			len(ids), len(mask), len(tts), MaxSeqLen)
 	}
 
 	// Copy input data into pre-allocated tensors

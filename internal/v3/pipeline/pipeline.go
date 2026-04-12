@@ -30,6 +30,10 @@ const (
 )
 
 // MarkRunning upserts a (file_id, pass_name) row with status=running.
+// Note: v3.0 is a single-writer architecture (spec §6.4). The checkpoint
+// helpers do not implement claim/lease semantics for concurrent workers.
+// Multi-worker support is v4.0 scope requiring SELECT...FOR UPDATE or
+// an advisory lock pattern.
 func MarkRunning(ctx context.Context, db *sql.DB, fileID int64, pass PassName) error {
 	_, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_state(file_id, pass_name, status, checkpoint_at)
