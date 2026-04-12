@@ -63,12 +63,8 @@ func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.Search
 				Query: req.Query, K: int32(max), ContentClasses: req.ContentClasses, Hydrate: hint,
 			})
 			if err != nil || r == nil {
-				msg := "internal error"
-				if err != nil {
-					msg = err.Error()
-				}
 				ch <- srcResult{"fts", nil, &pb.SourceStatus{
-					SourceName: "fts", Status: "DEGRADED", ErrorMessage: msg,
+					SourceName: "fts", Status: "DEGRADED", ErrorMessage: "fts source unavailable",
 				}}
 				return
 			}
@@ -82,12 +78,8 @@ func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.Search
 				Query: req.Query, K: int32(max / 2), Hydrate: hint,
 			})
 			if err != nil || r == nil {
-				msg := "internal error"
-				if err != nil {
-					msg = err.Error()
-				}
 				ch <- srcResult{"filename", nil, &pb.SourceStatus{
-					SourceName: "filename", Status: "DEGRADED", ErrorMessage: msg,
+					SourceName: "filename", Status: "DEGRADED", ErrorMessage: "filename source unavailable",
 				}}
 				return
 			}
@@ -101,7 +93,7 @@ func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.Search
 				vec, err := h.Embedder.EmbedQuery(req.Query)
 				if err != nil {
 					ch <- srcResult{"vector", nil, &pb.SourceStatus{
-						SourceName: "vector", Status: "DEGRADED", ErrorMessage: err.Error(),
+						SourceName: "vector", Status: "DEGRADED", ErrorMessage: "embedding failed",
 					}}
 					return
 				}
@@ -109,12 +101,8 @@ func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.Search
 					QueryEmbeddingInt8: vec, K: int32(max), ContentClasses: req.ContentClasses, Hydrate: hint,
 				})
 				if err != nil || r == nil {
-					msg := "internal error"
-					if err != nil {
-						msg = err.Error()
-					}
 					ch <- srcResult{"vector", nil, &pb.SourceStatus{
-						SourceName: "vector", Status: "DEGRADED", ErrorMessage: msg,
+						SourceName: "vector", Status: "DEGRADED", ErrorMessage: "vector source unavailable",
 					}}
 					return
 				}
@@ -147,21 +135,23 @@ func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.Search
 		}
 	}
 
-	// Required-source enforcement per spec §9.5
+	// Required-source enforcement per spec §9.5.
+	// A source that executed but returned no results (EMPTY_BUT_EXECUTED)
+	// is still a successful execution — only truly failed sources trigger error.
 	if mode == "lexical" {
-		if !containsSource(resp.Sources, "fts", "OK") {
+		if !sourceExecutedOK(resp.Sources, "fts") {
 			resp.OverallStatus = "error"
 			return resp, nil
 		}
 	}
 	if mode == "filename" {
-		if !containsSource(resp.Sources, "filename", "OK") {
+		if !sourceExecutedOK(resp.Sources, "filename") {
 			resp.OverallStatus = "error"
 			return resp, nil
 		}
 	}
 	if mode == "semantic" {
-		if !containsSource(resp.Sources, "vector", "OK") {
+		if !sourceExecutedOK(resp.Sources, "vector") {
 			resp.OverallStatus = "error"
 			return resp, nil
 		}
@@ -190,6 +180,17 @@ func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.Search
 func containsSource(sources []*pb.SourceStatus, name, status string) bool {
 	for _, s := range sources {
 		if s != nil && s.SourceName == name && s.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+// sourceExecutedOK returns true if the named source executed successfully.
+// Both "OK" and "EMPTY_BUT_EXECUTED" count as successful execution.
+func sourceExecutedOK(sources []*pb.SourceStatus, name string) bool {
+	for _, s := range sources {
+		if s != nil && s.SourceName == name && (s.Status == "OK" || s.Status == "EMPTY_BUT_EXECUTED") {
 			return true
 		}
 	}

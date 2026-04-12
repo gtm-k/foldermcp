@@ -44,7 +44,7 @@ ORDER BY path
 LIMIT ? OFFSET ?`, req.Path, maxItems+1, offset)
 	if err != nil {
 		resp.Status.Status = "DEGRADED"
-		resp.Status.ErrorMessage = err.Error()
+		resp.Status.ErrorMessage = "browse query failed"
 		return resp, nil
 	}
 	defer func() { _ = rows.Close() }()
@@ -59,7 +59,7 @@ LIMIT ? OFFSET ?`, req.Path, maxItems+1, offset)
 		var e pb.FolderEntry
 		if err := rows.Scan(&e.FileId, &e.Path, &e.Size, &e.Mtime, &e.ContentClass); err != nil {
 			resp.Status.Status = "CONTRACT_ERROR"
-			resp.Status.ErrorMessage = err.Error()
+			resp.Status.ErrorMessage = "row scan failed"
 			return resp, nil
 		}
 		parts := strings.Split(e.Path, "/")
@@ -69,7 +69,7 @@ LIMIT ? OFFSET ?`, req.Path, maxItems+1, offset)
 	}
 	if err := rows.Err(); err != nil {
 		resp.Status.Status = "CONTRACT_ERROR"
-		resp.Status.ErrorMessage = err.Error()
+		resp.Status.ErrorMessage = "result iteration failed"
 		return resp, nil
 	}
 

@@ -7,6 +7,9 @@ import (
 // ── Proto → JSON conversion helpers ────────────────────────
 
 func searchResultFromProto(p *pb.SearchBroadlyResponse) *SearchResult {
+	if p == nil {
+		return &SearchResult{Status: "error", Completeness: "partial"}
+	}
 	out := &SearchResult{
 		Status:        p.OverallStatus,
 		Completeness:  p.Completeness,
@@ -42,6 +45,9 @@ func searchResultFromProto(p *pb.SearchBroadlyResponse) *SearchResult {
 }
 
 func inspectResultFromProto(p *pb.InspectNodeResponse) *InspectResult {
+	if p == nil {
+		return &InspectResult{Status: "error"}
+	}
 	r := &InspectResult{}
 	if p.Status != nil {
 		r.Status = p.Status.Status
@@ -72,6 +78,9 @@ func inspectResultFromProto(p *pb.InspectNodeResponse) *InspectResult {
 }
 
 func browseResultFromProto(p *pb.BrowseFolderResponse) *BrowseResult {
+	if p == nil {
+		return &BrowseResult{Status: "error"}
+	}
 	out := &BrowseResult{NextCursor: p.NextCursor}
 	if p.Status != nil {
 		out.Status = p.Status.Status
