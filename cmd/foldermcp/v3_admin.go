@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gtm-k/foldermcp/internal/v3/grpc/admin"
+	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
 )
 
@@ -38,14 +39,14 @@ func runV3IndexHealth(ctx context.Context) error {
 	}
 	defer func() { _ = db.Close() }()
 	h := &admin.Handler{DB: db}
-	resp, err := h.Health(ctx, nil)
+	resp, err := h.Health(ctx, &pb.HealthRequest{})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("quick_check=%v integrity_check=%v %s\n",
 		resp.DbQuickCheckOk, resp.IntegrityCheckOk, resp.ErrorMessage)
 	if !resp.DbQuickCheckOk || !resp.IntegrityCheckOk {
-		os.Exit(1)
+		return fmt.Errorf("health check failed: %s", resp.ErrorMessage)
 	}
 	return nil
 }
@@ -57,7 +58,7 @@ func runV3IndexStatus(ctx context.Context) error {
 	}
 	defer func() { _ = db.Close() }()
 	h := &admin.Handler{DB: db}
-	resp, err := h.Status(ctx, nil)
+	resp, err := h.Status(ctx, &pb.StatusRequest{})
 	if err != nil {
 		return err
 	}
