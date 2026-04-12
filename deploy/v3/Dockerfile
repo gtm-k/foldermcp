@@ -16,6 +16,8 @@
 #   docker run --rm foldermcp:v3-m1 serve
 
 # ─── Build stage ──────────────────────────────────────────
+# golang:1.25-bookworm matches CI (go-version: '1.25.x').
+# Fallback: golang:1.25 or golang:1.25.0-bookworm if the tag moves.
 FROM golang:1.25-bookworm AS build
 
 WORKDIR /src

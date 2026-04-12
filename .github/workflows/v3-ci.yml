@@ -34,6 +34,20 @@ jobs:
         env:
           CGO_ENABLED: 1
 
+  v3-docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image (linux/amd64)
+        run: |
+          docker build \
+            -f deploy/v3/Dockerfile \
+            -t foldermcp:v3-ci-${{ github.sha }} \
+            .
+      - name: Verify binary runs inside container
+        run: |
+          docker run --rm foldermcp:v3-ci-${{ github.sha }} --help
+
   v3-test-laptop-nocgo:
     strategy:
       fail-fast: false
