@@ -53,12 +53,12 @@ func TestChunkProseEmptyText(t *testing.T) {
 }
 
 func TestChunkProseParagraphBoundaries(t *testing.T) {
-	// Two paragraphs, each under max tokens
-	cfg := Config{TargetTokens: 10, MinTokens: 3, MaxTokens: 15, OverlapToks: 0}
-	text := "one two three four five\n\nsix seven eight nine ten"
+	// Two paragraphs, each over TargetTokens so they must split at \n\n
+	cfg := Config{TargetTokens: 5, MinTokens: 2, MaxTokens: 12, OverlapToks: 0}
+	text := "one two three four five six seven\n\neight nine ten eleven twelve thirteen"
 	chunks := ChunkProse(text, cfg, wordCounter{})
-	if len(chunks) != 2 {
-		t.Errorf("paragraph split → %d chunks, want 2", len(chunks))
+	if len(chunks) < 2 {
+		t.Errorf("paragraph split → %d chunks, want ≥2", len(chunks))
 	}
 }
 

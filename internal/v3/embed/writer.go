@@ -59,7 +59,7 @@ func (w *Writer) WriteBatch(tx *sql.Tx, pairs []EmbedPair) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, p := range pairs {
 		if len(p.Vector) != Dimension {

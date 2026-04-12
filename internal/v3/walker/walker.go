@@ -47,7 +47,7 @@ ON CONFLICT(path) DO UPDATE SET
 			_ = tx.Rollback()
 			return err
 		}
-		defer stmt.Close()
+		defer func() { _ = stmt.Close() }()
 
 		now := time.Now().Unix()
 		for _, r := range batch {

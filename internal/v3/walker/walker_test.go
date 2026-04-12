@@ -12,7 +12,8 @@ import (
 )
 
 func TestWalkerUpsertsFiles(t *testing.T) {
-	tmp := t.TempDir()
+	walkRoot := t.TempDir()
+	dbDir := t.TempDir() // separate dir for DB to avoid walking WAL/SHM files
 
 	// Seed files
 	must := func(err error) {
@@ -21,15 +22,15 @@ func TestWalkerUpsertsFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(os.MkdirAll(filepath.Join(tmp, "src"), 0755))
-	must(os.WriteFile(filepath.Join(tmp, "src", "a.py"), []byte("print('hi')"), 0644))
-	must(os.WriteFile(filepath.Join(tmp, "src", "b.go"), []byte("package main"), 0644))
-	must(os.WriteFile(filepath.Join(tmp, "README.md"), []byte("# hi"), 0644))
+	must(os.MkdirAll(filepath.Join(walkRoot, "src"), 0755))
+	must(os.WriteFile(filepath.Join(walkRoot, "src", "a.py"), []byte("print('hi')"), 0644))
+	must(os.WriteFile(filepath.Join(walkRoot, "src", "b.go"), []byte("package main"), 0644))
+	must(os.WriteFile(filepath.Join(walkRoot, "README.md"), []byte("# hi"), 0644))
 	// ignored dir
-	must(os.MkdirAll(filepath.Join(tmp, ".git"), 0755))
-	must(os.WriteFile(filepath.Join(tmp, ".git", "HEAD"), []byte("ref: x"), 0644))
+	must(os.MkdirAll(filepath.Join(walkRoot, ".git"), 0755))
+	must(os.WriteFile(filepath.Join(walkRoot, ".git", "HEAD"), []byte("ref: x"), 0644))
 
-	dbPath := filepath.Join(tmp, "w.db")
+	dbPath := filepath.Join(dbDir, "w.db")
 	db, err := store.Open(store.Options{Path: dbPath, Tier: store.TierMid})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -39,7 +40,7 @@ func TestWalkerUpsertsFiles(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	n, err := Walk(context.Background(), db, Options{Root: tmp})
+	n, err := Walk(context.Background(), db, Options{Root: walkRoot})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -49,9 +50,9 @@ func TestWalkerUpsertsFiles(t *testing.T) {
 
 	// Verify classes
 	var pyClass, goClass, mdClass string
-	_ = db.QueryRow(`SELECT content_class FROM files WHERE path=?`, filepath.Join(tmp, "src", "a.py")).Scan(&pyClass)
-	_ = db.QueryRow(`SELECT content_class FROM files WHERE path=?`, filepath.Join(tmp, "src", "b.go")).Scan(&goClass)
-	_ = db.QueryRow(`SELECT content_class FROM files WHERE path=?`, filepath.Join(tmp, "README.md")).Scan(&mdClass)
+	_ = db.QueryRow(`SELECT content_class FROM files WHERE path=?`, filepath.Join(walkRoot, "src", "a.py")).Scan(&pyClass)
+	_ = db.QueryRow(`SELECT content_class FROM files WHERE path=?`, filepath.Join(walkRoot, "src", "b.go")).Scan(&goClass)
+	_ = db.QueryRow(`SELECT content_class FROM files WHERE path=?`, filepath.Join(walkRoot, "README.md")).Scan(&mdClass)
 
 	if pyClass != "code" {
 		t.Errorf("a.py class = %s, want code", pyClass)
@@ -65,12 +66,13 @@ func TestWalkerUpsertsFiles(t *testing.T) {
 }
 
 func TestWalkerIdempotent(t *testing.T) {
-	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "f.txt"), []byte("data"), 0644); err != nil {
+	walkRoot := t.TempDir()
+	dbDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(walkRoot, "f.txt"), []byte("data"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	dbPath := filepath.Join(tmp, "w.db")
+	dbPath := filepath.Join(dbDir, "w.db")
 	db, err := store.Open(store.Options{Path: dbPath, Tier: store.TierMid})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -81,11 +83,11 @@ func TestWalkerIdempotent(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := Walk(ctx, db, Options{Root: tmp}); err != nil {
+	if _, err := Walk(ctx, db, Options{Root: walkRoot}); err != nil {
 		t.Fatal(err)
 	}
 	// Run again — should upsert, not error
-	if _, err := Walk(ctx, db, Options{Root: tmp}); err != nil {
+	if _, err := Walk(ctx, db, Options{Root: walkRoot}); err != nil {
 		t.Fatal(err)
 	}
 
