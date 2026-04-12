@@ -48,7 +48,10 @@ func TestVec0TableCreated(t *testing.T) {
 	for i := range vec {
 		vec[i] = byte(i % 128)
 	}
-	if _, err := db.Exec(`INSERT INTO embeddings(chunk_id, embedding) VALUES(1, ?)`, vec); err != nil {
+	// Plain BLOBs default to float32 interpretation in sqlite-vec; wrap with
+	// vec_int8() so the inserted value carries the INT8 element-type subtype
+	// that vec0's `int8[384]` column requires.
+	if _, err := db.Exec(`INSERT INTO embeddings(chunk_id, embedding) VALUES(1, vec_int8(?))`, vec); err != nil {
 		t.Fatalf("embedding insert: %v", err)
 	}
 
