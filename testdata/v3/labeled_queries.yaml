@@ -1,0 +1,472 @@
+# M1 seed labeled query set — version 1
+# 35 queries spanning 4 personas: tech-enthusiast, researcher, writer, devops.
+#
+# Relevance scale:
+#   0 = not relevant
+#   1 = somewhat relevant (mentions the topic but isn't the primary source)
+#   2 = highly relevant (directly answers the query)
+#
+# Each query has at least 2 relevance judgments (multi-grade).
+# Author field: "synthetic" for M1 seed queries (single author OK per plan).
+#   After M1, authors and judges must be different people.
+#
+# Judgment paths are relative to the QA workspace root and match MANIFEST.yaml
+# dest values. symbol is the function/class/struct being judged.
+#
+# Freeze policy: this file is frozen at end of week 8 for M1. Further edits
+# go into labeled_queries_v2.yaml (M2 expansion to 100–150 queries).
+
+version: 1
+
+queries:
+  # ──── Tech Enthusiast persona (10 queries) ────────────
+
+  - id: q001
+    text: "how does requests handle connection pooling"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/requests/requests/adapters.py
+        symbol: HTTPAdapter
+        grade: 2
+      - path: code-python/requests/requests/sessions.py
+        symbol: Session
+        grade: 1
+      - path: code-python/requests/requests/models.py
+        symbol: Response
+        grade: 0
+
+  - id: q002
+    text: "flask request context and thread safety"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/flask/src/flask/ctx.py
+        symbol: RequestContext
+        grade: 2
+      - path: code-python/flask/src/flask/globals.py
+        symbol: request
+        grade: 2
+      - path: code-python/flask/src/flask/app.py
+        symbol: Flask
+        grade: 1
+
+  - id: q003
+    text: "how does cobra parse subcommands and flags"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/cobra/command.go
+        symbol: Command.ExecuteC
+        grade: 2
+      - path: code-go/cobra/command.go
+        symbol: Command.ParseFlags
+        grade: 2
+      - path: code-go/cobra/args.go
+        symbol: ValidateArgs
+        grade: 1
+
+  - id: q004
+    text: "hugo template functions for content rendering"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/hugo/tpl/tplimpl/template.go
+        symbol: templateExec
+        grade: 2
+      - path: code-go/hugo/hugolib/page.go
+        symbol: pageState
+        grade: 1
+
+  - id: q005
+    text: "how does black format Python code and handle magic trailing commas"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/black/src/black/linegen.py
+        symbol: LineGenerator
+        grade: 2
+      - path: code-python/black/src/black/lines.py
+        symbol: Line
+        grade: 2
+      - path: code-python/black/src/black/mode.py
+        symbol: Mode
+        grade: 1
+
+  - id: q006
+    text: "what error handling patterns does requests use for HTTP failures"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/requests/requests/exceptions.py
+        symbol: HTTPError
+        grade: 2
+      - path: code-python/requests/requests/models.py
+        symbol: Response.raise_for_status
+        grade: 2
+      - path: code-python/requests/requests/adapters.py
+        symbol: HTTPAdapter.send
+        grade: 1
+
+  - id: q007
+    text: "cobra command completion and shell integration"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/cobra/completions.go
+        symbol: CompletionOptions
+        grade: 2
+      - path: code-go/cobra/bash_completionsV2.go
+        symbol: GenBashCompletionV2
+        grade: 2
+
+  - id: q008
+    text: "flask blueprints for modular app structure"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/flask/src/flask/blueprints.py
+        symbol: Blueprint
+        grade: 2
+      - path: code-python/flask/src/flask/scaffold.py
+        symbol: Scaffold
+        grade: 1
+      - path: code-python/flask/src/flask/app.py
+        symbol: Flask.register_blueprint
+        grade: 2
+
+  - id: q009
+    text: "hugo content management and front matter parsing"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/hugo/parser/pageparser/pagelexer.go
+        symbol: pageLexer
+        grade: 2
+      - path: code-go/hugo/hugolib/page.go
+        symbol: pageState
+        grade: 1
+
+  - id: q010
+    text: "requests session cookie persistence across redirects"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/requests/requests/sessions.py
+        symbol: Session
+        grade: 2
+      - path: code-python/requests/requests/cookies.py
+        symbol: RequestsCookieJar
+        grade: 2
+      - path: code-python/requests/requests/models.py
+        symbol: PreparedRequest
+        grade: 1
+
+  # ──── Researcher persona (10 queries) ─────────────────
+
+  - id: q011
+    text: "attention mechanism in transformer architectures"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/attention-is-all-you-need.pdf
+        symbol: null
+        grade: 2
+      - path: docs-pdf/bert-pre-training.pdf
+        symbol: null
+        grade: 1
+
+  - id: q012
+    text: "reinforcement learning from human feedback methodology"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/rlhf-training-language-models.pdf
+        symbol: null
+        grade: 2
+      - path: docs-pdf/constitutional-ai.pdf
+        symbol: null
+        grade: 1
+
+  - id: q013
+    text: "contrastive learning and self-supervised representation"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/simclr-visual-representations.pdf
+        symbol: null
+        grade: 2
+      - path: docs-pdf/byol-representation-learning.pdf
+        symbol: null
+        grade: 2
+
+  - id: q014
+    text: "graph neural networks for molecular property prediction"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/gnn-molecular-prediction.pdf
+        symbol: null
+        grade: 2
+
+  - id: q015
+    text: "diffusion models for image generation mathematical foundations"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/ddpm-denoising-diffusion.pdf
+        symbol: null
+        grade: 2
+      - path: docs-pdf/score-based-generative-models.pdf
+        symbol: null
+        grade: 1
+
+  - id: q016
+    text: "few-shot learning with large language models"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/gpt3-few-shot-learners.pdf
+        symbol: null
+        grade: 2
+      - path: docs-pdf/scaling-laws-neural-lm.pdf
+        symbol: null
+        grade: 1
+
+  - id: q017
+    text: "neural network pruning and efficient inference"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/lottery-ticket-hypothesis.pdf
+        symbol: null
+        grade: 2
+
+  - id: q018
+    text: "retrieval augmented generation architecture"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/rag-retrieval-augmented-generation.pdf
+        symbol: null
+        grade: 2
+      - path: docs-pdf/dense-passage-retrieval.pdf
+        symbol: null
+        grade: 1
+
+  - id: q019
+    text: "normalization techniques in deep learning: batch norm vs layer norm"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/batch-normalization.pdf
+        symbol: null
+        grade: 2
+      - path: docs-pdf/layer-normalization.pdf
+        symbol: null
+        grade: 2
+
+  - id: q020
+    text: "knowledge distillation from large to small models"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/distilbert-distilled-bert.pdf
+        symbol: null
+        grade: 2
+
+  # ──── Writer persona (8 queries) ──────────────────────
+
+  - id: q021
+    text: "my notes from the interview with Dr. Chen about renewable energy"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/interviews/dr-chen-renewable-energy.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/research/energy-transition-notes.md
+        symbol: null
+        grade: 1
+
+  - id: q022
+    text: "draft outline for the investigative piece on water rights"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/drafts/water-rights-investigation.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/research/water-policy-sources.md
+        symbol: null
+        grade: 1
+
+  - id: q023
+    text: "all my notes tagged with climate change from 2024"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/research/energy-transition-notes.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/interviews/dr-chen-renewable-energy.md
+        symbol: null
+        grade: 1
+      - path: docs-markdown/vault/daily/2024-03-15-climate-summit.md
+        symbol: null
+        grade: 2
+
+  - id: q024
+    text: "sources I cited in the tech layoffs article"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/published/tech-layoffs-analysis.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/research/tech-industry-sources.md
+        symbol: null
+        grade: 2
+
+  - id: q025
+    text: "interview transcripts from the housing crisis series"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/interviews/housing-crisis-tenant-a.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/interviews/housing-crisis-developer-b.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/drafts/housing-crisis-series-outline.md
+        symbol: null
+        grade: 1
+
+  - id: q026
+    text: "what did I write about the school board meeting last month"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/daily/2024-02-school-board-meeting.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/published/education-budget-cuts.md
+        symbol: null
+        grade: 1
+
+  - id: q027
+    text: "my book proposal draft and editor feedback"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/drafts/book-proposal-v2.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/correspondence/editor-feedback-march.md
+        symbol: null
+        grade: 2
+
+  - id: q028
+    text: "obsidian daily notes from the week of the conference"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/vault/daily/2024-03-11-monday.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/daily/2024-03-12-tuesday.md
+        symbol: null
+        grade: 2
+      - path: docs-markdown/vault/daily/2024-03-15-climate-summit.md
+        symbol: null
+        grade: 1
+
+  # ──── DevOps persona (7 queries) ──────────────────────
+
+  - id: q029
+    text: "cobra command flag validation"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-go/cobra/command.go
+        symbol: Command.ValidateArgs
+        grade: 2
+      - path: code-go/cobra/args.go
+        symbol: MinimumNArgs
+        grade: 2
+
+  - id: q030
+    text: "hugo configuration file loading and viper integration"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-go/hugo/config/configLoader.go
+        symbol: LoadConfig
+        grade: 2
+      - path: code-go/hugo/hugolib/config.go
+        symbol: loadConfig
+        grade: 1
+
+  - id: q031
+    text: "flask production deployment with gunicorn and WSGI"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-python/flask/src/flask/app.py
+        symbol: Flask.__call__
+        grade: 2
+      - path: code-python/flask/src/flask/cli.py
+        symbol: FlaskGroup
+        grade: 1
+
+  - id: q032
+    text: "gopls workspace symbols and code navigation internals"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-go/gopls/gopls/internal/server/symbols.go
+        symbol: symbol
+        grade: 2
+      - path: code-go/gopls/gopls/internal/server/workspace.go
+        symbol: workspace
+        grade: 1
+
+  - id: q033
+    text: "requests TLS certificate verification and custom CA bundles"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-python/requests/requests/adapters.py
+        symbol: HTTPAdapter
+        grade: 2
+      - path: code-python/requests/requests/certs.py
+        symbol: where
+        grade: 2
+
+  - id: q034
+    text: "hugo static site build pipeline and output formats"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-go/hugo/hugolib/hugo_sites_build.go
+        symbol: Build
+        grade: 2
+      - path: code-go/hugo/output/outputFormat.go
+        symbol: Format
+        grade: 2
+
+  - id: q035
+    text: "flask middleware and request/response lifecycle hooks"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-python/flask/src/flask/app.py
+        symbol: Flask.before_request
+        grade: 2
+      - path: code-python/flask/src/flask/app.py
+        symbol: Flask.after_request
+        grade: 2
+      - path: code-python/flask/src/flask/wrappers.py
+        symbol: Request
+        grade: 1

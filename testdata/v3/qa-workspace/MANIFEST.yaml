@@ -1,0 +1,84 @@
+# QA workspace manifest — version 1 (M1)
+# Total target size: ~10 GB. Files are NOT checked into git; scripts/build-qa-workspace.sh
+# downloads and arranges them. CI cold cache downloads once, developers do the same.
+#
+# Content mix rationale (from spec §12.2):
+#   - Python + Go projects: exercise tree-sitter grammars (M1's 2 supported langs)
+#   - Research PDFs: exercise pdftotext extraction pass
+#   - Writer vault: exercise prose chunker + Markdown headings
+#   - Homelab media: exercise binary detection + metadata extraction stubs
+#   - Edge cases: exercise walker resilience (empty files, deep nesting, symlinks)
+
+version: 1
+total_size_mb: 10000
+
+sources:
+  # ─── Python projects (~300 MB) ────────────────────────
+  - name: python-requests
+    kind: git
+    url: https://github.com/psf/requests
+    ref: v2.31.0
+    dest: code-python/requests/
+
+  - name: python-flask
+    kind: git
+    url: https://github.com/pallets/flask
+    ref: 3.0.0
+    dest: code-python/flask/
+
+  - name: python-black
+    kind: git
+    url: https://github.com/psf/black
+    ref: 24.1.1
+    dest: code-python/black/
+
+  # ─── Go projects (~400 MB) ───────────────────────────
+  - name: go-cobra
+    kind: git
+    url: https://github.com/spf13/cobra
+    ref: v1.8.0
+    dest: code-go/cobra/
+
+  - name: go-hugo
+    kind: git
+    url: https://github.com/gohugoio/hugo
+    ref: v0.123.0
+    dest: code-go/hugo/
+
+  - name: go-gopls
+    kind: git
+    url: https://github.com/golang/tools
+    ref: gopls/v0.15.0
+    dest: code-go/gopls/
+
+  # ─── Research PDFs (~400 MB) ─────────────────────────
+  # 20 open-access arXiv papers with citations, curated manually.
+  # Listed in scripts/qa-pdfs.txt as URL + expected SHA256.
+  - name: arxiv-pdfs
+    kind: list
+    list: scripts/qa-pdfs.txt
+    dest: docs-pdf/
+
+  # ─── Writer notes (~200 MB) ─────────────────────────
+  # Synthetic Markdown vault: drafts, interview transcripts, Obsidian-style
+  # links, frontmatter, nested folders. Generated deterministically.
+  - name: writer-vault
+    kind: generate
+    generator: scripts/gen-writer-vault.py
+    dest: docs-markdown/vault/
+
+  # ─── Homelab media (~500 MB) ─────────────────────────
+  # Free-sample MP4/WAV/MP3, CC-BY photos with EXIF metadata.
+  # Listed in scripts/qa-media.txt as URL + expected SHA256.
+  - name: homelab-media
+    kind: list
+    list: scripts/qa-media.txt
+    dest: media/
+
+  # ─── Edge cases (~100 MB) ───────────────────────────
+  # empty file, no-extension, emoji filenames, symlinks,
+  # >20-level nesting, >100 MB file, non-Latin scripts
+  - name: edge-cases
+    kind: generate
+    generator: scripts/gen-edge-cases.sh
+    dest: edge-cases/
