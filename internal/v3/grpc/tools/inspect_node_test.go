@@ -17,7 +17,7 @@ func TestInspectReturnsNode(t *testing.T) {
 	mustExec(t, db, `INSERT INTO nodes(file_id,node_type,name,provenance,created_at,updated_at)
 		VALUES(1,'function','main','EXTRACTED',1,1)`)
 	mustExec(t, db, `INSERT INTO chunks(node_id,text,byte_start,byte_end,token_count,chunk_kind)
-		VALUES(1,'func main() { fmt.Println("hello") }',0,37,8,'code')`)
+		VALUES(1,'func main() { fmt.Println("hello") }',0,37,8,'code_ast')`)
 
 	h := &InspectHandler{DB: db, Nodes: &query.NodesHandler{DB: db}}
 	resp, err := h.Inspect(context.Background(), &pb.InspectNodeRequest{NodeId: 1, Detail: "standard"})
