@@ -208,11 +208,20 @@ func TestConcurrentQueriesUnderLoad(t *testing.T) {
 		success int
 	)
 
-	// Cancel midway through to test cancellation under load
+	// Cancel midway through to test cancellation under load.
+	// The helper goroutine must exit when the test completes, otherwise
+	// goleak.VerifyNone(t) will flag it as a leak. We use a cancel channel
+	// so the goroutine always exits regardless of whether the 5s timer fires.
 	midCancel, midStop := context.WithCancel(ctx)
+	defer midStop()
+	testDone := make(chan struct{})
+	defer close(testDone)
 	go func() {
-		time.Sleep(5 * time.Second)
-		midStop()
+		select {
+		case <-time.After(5 * time.Second):
+			midStop()
+		case <-testDone:
+		}
 	}()
 
 	for i := range numWorkers {

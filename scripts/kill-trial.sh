@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stratified kill-trial harness — Exit Gate G4
 #
-# Spawns `foldermcp index` on a copy of the micro-fixture, kills it at
+# Spawns `foldermcp index-v3` on a copy of the micro-fixture, kills it at
 # 10 different timing windows, restarts, and verifies DB integrity.
 #
 # Kill windows (10 trials, 2 each per spec §13.1):
@@ -76,7 +76,7 @@ for trial_spec in "${TRIALS[@]}"; do
     echo "==> Trial: ${name} (kill after ${delay}s)"
 
     # Start the indexer
-    FOLDERMCP_STORE="${STORE}" "${BIN}" index "${FIXTURE}" &
+    FOLDERMCP_STORE="${STORE}" "${BIN}" index-v3 "${FIXTURE}" &
     PID=$!
     sleep "${delay}"
 
@@ -87,7 +87,7 @@ for trial_spec in "${TRIALS[@]}"; do
     echo "    killed (pid ${PID})"
 
     # Verify DB integrity after crash
-    if ! FOLDERMCP_STORE="${STORE}" "${BIN}" index health 2>&1; then
+    if ! FOLDERMCP_STORE="${STORE}" "${BIN}" index-v3 health 2>&1; then
         echo "    ❌ FAIL: health check failed after kill"
         FAILED=$((FAILED + 1))
         continue
@@ -98,7 +98,7 @@ for trial_spec in "${TRIALS[@]}"; do
     # returning 124 is expected. We capture $? directly because `if !`
     # clobbers it to 0 inside the then-block.
     set +e
-    FOLDERMCP_STORE="${STORE}" timeout 120 "${BIN}" index "${FIXTURE}" 2>&1
+    FOLDERMCP_STORE="${STORE}" timeout 120 "${BIN}" index-v3 "${FIXTURE}" 2>&1
     EXIT_CODE=$?
     set -e
 
@@ -112,7 +112,7 @@ for trial_spec in "${TRIALS[@]}"; do
     fi
 
     # Final health check after recovery
-    if ! FOLDERMCP_STORE="${STORE}" "${BIN}" index health 2>&1; then
+    if ! FOLDERMCP_STORE="${STORE}" "${BIN}" index-v3 health 2>&1; then
         echo "    ❌ FAIL: health check failed after recovery"
         FAILED=$((FAILED + 1))
         continue

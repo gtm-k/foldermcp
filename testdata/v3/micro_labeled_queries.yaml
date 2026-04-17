@@ -1,0 +1,177 @@
+# Micro-fixture labeled query set — G5 smoke variant.
+#
+# Purpose: validate that the retrieval harness, RRF fusion, and search modes
+# work end-to-end against the small 12-file micro-fixture. NOT a substitute
+# for the frozen `labeled_queries.yaml` which targets the full QA workspace.
+#
+# Design: queries bias AGAINST filename-only matching. The query text avoids
+# substring-matching the target filename so filename-only returns low recall
+# while auto mode can find the target via FTS and/or vector search.
+#
+# Relevance scale:
+#   0 = not relevant
+#   1 = somewhat relevant
+#   2 = highly relevant (directly answers the query)
+#
+# Judgment paths are substrings matched against hit paths (not absolute).
+
+version: 1
+fixture: micro
+queries:
+
+  # ── Target: code-python/session_manager.py ──
+
+  - id: m001
+    text: "exponential backoff retry logic for HTTP"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/session_manager.py
+        symbol: RetryConfig
+        grade: 2
+
+  - id: m002
+    text: "connection pooling with configurable timeouts"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/session_manager.py
+        symbol: SessionManager
+        grade: 2
+
+  # ── Target: code-python/cache.py ──
+
+  - id: m003
+    text: "thread-safe LRU eviction policy with TTL expiration"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/cache.py
+        symbol: LRUCache
+        grade: 2
+
+  - id: m004
+    text: "OrderedDict based memory cache with bounded size"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/cache.py
+        symbol: CacheEntry
+        grade: 2
+
+  # ── Target: code-python/data_pipeline.py ──
+
+  - id: m005
+    text: "strict versus lenient data validation modes"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: code-python/data_pipeline.py
+        symbol: ValidationLevel
+        grade: 2
+
+  - id: m006
+    text: "schema-based type coercion for structured records"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: code-python/data_pipeline.py
+        symbol: ValidationLevel
+        grade: 2
+
+  # ── Target: code-python/cli.py ──
+
+  - id: m007
+    text: "argparse subcommands for index search and serve"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/cli.py
+        symbol: create_parser
+        grade: 2
+
+  # ── Target: code-go/config.go ──
+
+  - id: m008
+    text: "hierarchical YAML configuration with environment overrides"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-go/config.go
+        symbol: Config
+        grade: 2
+
+  # ── Target: code-go/middleware.go ──
+
+  - id: m009
+    text: "HTTP request logging and panic recovery chain"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/middleware.go
+        symbol: Chain
+        grade: 2
+
+  - id: m010
+    text: "rate limiting for web API requests"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: code-go/middleware.go
+        symbol: RateLimit
+        grade: 2
+
+  # ── Target: code-go/repository.go ──
+
+  - id: m011
+    text: "generic CRUD operations with entity interface constraint"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/repository.go
+        symbol: Repository
+        grade: 2
+
+  # ── Target: code-go/worker_pool.go ──
+
+  - id: m012
+    text: "bounded concurrent task queue with graceful shutdown"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/worker_pool.go
+        symbol: WorkerPool
+        grade: 2
+
+  # ── Target: docs-markdown/architecture.md ──
+
+  - id: m013
+    text: "system architecture components and data flow"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/architecture.md
+        symbol: ""
+        grade: 2
+
+  # ── Target: docs-markdown/api-reference.md ──
+
+  - id: m014
+    text: "REST endpoint specifications with request response tables"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/api-reference.md
+        symbol: ""
+        grade: 2
+
+  # ── Target: docs-prose/research-notes.md ──
+
+  - id: m015
+    text: "research observations on retrieval quality tradeoffs"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-prose/research-notes.md
+        symbol: ""
+        grade: 2

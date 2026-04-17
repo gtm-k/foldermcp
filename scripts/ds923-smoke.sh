@@ -92,7 +92,7 @@ echo "    ✅ RSS within ceiling"
 
 # ── Step 4: Verify health inside container ────────────────
 echo "==> Checking health..."
-if ! docker exec "${CONTAINER_NAME}" foldermcp index health 2>&1; then
+if ! docker exec "${CONTAINER_NAME}" foldermcp index-v3 health 2>&1; then
     echo "❌ FAIL G6: health check failed during steady-state"
     exit 1
 fi
@@ -108,7 +108,7 @@ docker start "${CONTAINER_NAME}"
 sleep 30
 
 echo "    verifying health after crash recovery..."
-if ! docker exec "${CONTAINER_NAME}" foldermcp index health 2>&1; then
+if ! docker exec "${CONTAINER_NAME}" foldermcp index-v3 health 2>&1; then
     echo "❌ FAIL G6: health check failed after crash recovery"
     exit 1
 fi
