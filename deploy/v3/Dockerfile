@@ -50,9 +50,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ONNX Runtime shared library for the runtime stage (same 1.24.1 release
 # used in WSL/dev). Downloaded here because bookworm-slim has no curl.
+# ORT_SHA256 is the official digest from the GitHub release asset
+# (api: /repos/microsoft/onnxruntime/releases, asset onnxruntime-linux-x64-1.24.1.tgz);
+# bumping ORT_VERSION requires updating it.
 ARG ORT_VERSION=1.24.1
+ARG ORT_SHA256=9142552248b735920f9390027e4512a2cacf8946a1ffcbe9071a5c210531026f
 RUN curl -fsSL -o /tmp/onnxruntime.tgz \
         "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
+    && echo "${ORT_SHA256}  /tmp/onnxruntime.tgz" | sha256sum --check --strict - \
     && tar -xzf /tmp/onnxruntime.tgz -C /tmp \
     && mkdir -p /out/lib \
     && cp "/tmp/onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so.${ORT_VERSION}" /out/lib/ \
