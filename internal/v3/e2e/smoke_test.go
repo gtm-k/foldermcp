@@ -10,7 +10,14 @@
 //
 // Run:
 //
-//	CGO_ENABLED=1 go test -tags 'cgo sqlite_fts5 e2e' -timeout 3m ./internal/v3/e2e/...
+//	CGO_ENABLED=1 go test -tags 'cgo sqlite_fts5 e2e' -timeout 8m ./internal/v3/e2e/...
+//
+// G37 (tightened, D28b D6): the test asserts non-empty results plus a
+// judgment-path substring for three graded known-hit queries from
+// testdata/v3/micro_labeled_queries.yaml — it therefore needs the real
+// embedding model at internal/v3/embed/model/ (run `make v3-fetch-model`)
+// and an ONNX Runtime shared library (default dlopen("onnxruntime.so"),
+// or set FOLDERMCP_ORT_LIB).
 package e2e
 
 import (
@@ -145,6 +152,37 @@ func sendJSONRPC(t *testing.T, stdin io.Writer, scanner *bufio.Scanner, req json
 	return jsonRPCResponse{} // unreachable
 }
 
+// g37Queries are the three graded known-hit queries (grade=2) from
+// testdata/v3/micro_labeled_queries.yaml (D28b D6): they span
+// code-python / code-go / docs-markdown. Each must return ≥1 result
+// with the judgment path among the hits.
+var g37Queries = []struct {
+	id       string
+	query    string
+	wantPath string
+}{
+	{"m002", "connection pooling with configurable timeouts", "code-python/session_manager.py"},
+	{"m008", "hierarchical YAML configuration with environment overrides", "code-go/config.go"},
+	{"m013", "system architecture components and data flow", "docs-markdown/architecture.md"},
+}
+
+// toolEnvelope is the MCP tools/call result wrapper.
+type toolEnvelope struct {
+	IsError bool `json:"isError"`
+	Content []struct {
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+// searchPayload mirrors router.SearchResult (the JSON inside content[0].text).
+type searchPayload struct {
+	Status  string `json:"status"`
+	Results []struct {
+		NodeID int64  `json:"node_id"`
+		Path   string `json:"path"`
+	} `json:"results"`
+}
+
 func TestE2EAllSubcommandSmoke(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping e2e smoke test in short mode")
@@ -156,6 +194,16 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 
 	if _, err := os.Stat(microFixture); err != nil {
 		t.Fatalf("micro-fixture not found at %s", microFixture)
+	}
+
+	// The tightened G37 assertions need a real index, which needs the
+	// embedding model. Fail (not skip) when absent: skipping would
+	// re-mask the zero-chunk failure this test exists to catch.
+	modelDir := filepath.Join(repoRoot, "internal", "v3", "embed", "model")
+	for _, f := range []string{"model.onnx", "tokenizer.json"} {
+		if _, err := os.Stat(filepath.Join(modelDir, f)); err != nil {
+			t.Fatalf("embedding model file %s missing in %s — run `make v3-fetch-model`", f, modelDir)
+		}
 	}
 
 	// Use a temp directory for the store and socket to avoid conflicts
@@ -178,7 +226,7 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 	sockPath = filepath.Join(homeFolderMCPDir, "serve.sock")
 
 	// ── Phase 1: Start foldermcp all-v3 ─────────────────
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
 	allCmd := exec.CommandContext(ctx, bin, "all-v3", microFixture)
@@ -186,6 +234,11 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 		fmt.Sprintf("FOLDERMCP_STORE=%s", storeDir),
 		fmt.Sprintf("HOME=%s", homeDir),
 		fmt.Sprintf("USERPROFILE=%s", homeDir), // Windows compat
+		// HOME is overridden above for isolation, so the binary cannot
+		// find the model via its ~/.foldermcp default — point it at the
+		// repo-local model dir. FOLDERMCP_ORT_LIB (if set) passes
+		// through via os.Environ().
+		fmt.Sprintf("FOLDERMCP_MODEL_DIR=%s", modelDir),
 	)
 	allCmd.Stderr = os.Stderr // pipe server logs to test output
 	if err := allCmd.Start(); err != nil {
@@ -250,33 +303,100 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 	})
 	fmt.Fprintf(mcpStdin, "%s\n", initNotif)
 
-	// ── Step 2b: Call foldermcp_search ───────────────────
-	searchResp := sendJSONRPC(t, mcpStdin, scanner, jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      2,
-		Method:  "tools/call",
-		Params: map[string]interface{}{
-			"name":      "foldermcp_search",
-			"arguments": map[string]string{"query": "connection pooling"},
-		},
-	})
-	if searchResp.Error != nil {
-		t.Errorf("foldermcp_search error: %s", searchResp.Error.Message)
-	} else {
-		respStr := string(searchResp.Result)
-		t.Logf("search response length: %d bytes", len(respStr))
-		if !strings.Contains(respStr, "content") {
-			t.Errorf("search response missing 'content' field: %s", truncate(respStr, 500))
+	reqID := 1 // initialize already used id=1
+	nextID := func() int { reqID++; return reqID }
+
+	search := func(query string) (searchPayload, error) {
+		resp := sendJSONRPC(t, mcpStdin, scanner, jsonRPCRequest{
+			JSONRPC: "2.0",
+			ID:      nextID(),
+			Method:  "tools/call",
+			Params: map[string]interface{}{
+				"name":      "foldermcp_search",
+				"arguments": map[string]string{"query": query},
+			},
+		})
+		if resp.Error != nil {
+			return searchPayload{}, fmt.Errorf("rpc error: %s", resp.Error.Message)
+		}
+		var env toolEnvelope
+		if err := json.Unmarshal(resp.Result, &env); err != nil {
+			return searchPayload{}, fmt.Errorf("parse envelope: %v in %s", err, truncate(string(resp.Result), 300))
+		}
+		if env.IsError || len(env.Content) == 0 {
+			return searchPayload{}, fmt.Errorf("tool error: %s", truncate(string(resp.Result), 300))
+		}
+		var p searchPayload
+		if err := json.Unmarshal([]byte(env.Content[0].Text), &p); err != nil {
+			return searchPayload{}, fmt.Errorf("parse payload: %v in %s", err, truncate(env.Content[0].Text, 300))
+		}
+		return p, nil
+	}
+	hasPathHit := func(p searchPayload, want string) bool {
+		for _, r := range p.Results {
+			if strings.Contains(r.Path, want) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// ── Step 2b: G37 — three known-hit queries (D28b D6) ─
+	// The indexer runs in the background; poll until all three graded
+	// queries hit (first run pays ONNX init + per-chunk embedding), then
+	// assert. A walker-only binary indexes nothing and can never satisfy
+	// this — the pre-D28b `"content"`-substring mask is gone.
+	lastResults := make(map[string]searchPayload, len(g37Queries))
+	lastErrs := make(map[string]error, len(g37Queries))
+	deadline := time.Now().Add(150 * time.Second)
+	for {
+		allGood := true
+		for _, q := range g37Queries {
+			p, err := search(q.query)
+			lastResults[q.id], lastErrs[q.id] = p, err
+			if err != nil || !hasPathHit(p, q.wantPath) {
+				allGood = false
+			}
+		}
+		if allGood || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
+	for _, q := range g37Queries {
+		p := lastResults[q.id]
+		if err := lastErrs[q.id]; err != nil {
+			t.Errorf("G37 %s (%q): search failed: %v", q.id, q.query, err)
+			continue
+		}
+		if len(p.Results) == 0 {
+			t.Errorf("G37 %s (%q): 0 results, want > 0", q.id, q.query)
+			continue
+		}
+		if !hasPathHit(p, q.wantPath) {
+			paths := make([]string, 0, len(p.Results))
+			for _, r := range p.Results {
+				paths = append(paths, r.Path)
+			}
+			t.Errorf("G37 %s (%q): no result path contains %q; got %v", q.id, q.query, q.wantPath, paths)
+		} else {
+			t.Logf("G37 %s: %d results, judgment path %q hit", q.id, len(p.Results), q.wantPath)
 		}
 	}
 
 	// ── Step 2c: Call foldermcp_inspect ──────────────────
-	// The inspect tool requires a node_id (integer) from a prior search result.
-	// Parse the search response to extract one; fall back to node_id=1 if parsing fails.
-	nodeID := extractNodeID(t, searchResp)
+	// node_id comes from m002's results (D28b D6). On a correctly wired
+	// pipeline the fallback must not fire; warn (don't fail) if it does,
+	// leaving room for node-id ordering drift.
+	nodeID := 1
+	if m002 := lastResults["m002"]; len(m002.Results) > 0 && m002.Results[0].NodeID > 0 {
+		nodeID = int(m002.Results[0].NodeID)
+	} else {
+		t.Log("WARNING: no node_id extracted from m002 results, falling back to node_id=1")
+	}
 	inspectResp := sendJSONRPC(t, mcpStdin, scanner, jsonRPCRequest{
 		JSONRPC: "2.0",
-		ID:      3,
+		ID:      nextID(),
 		Method:  "tools/call",
 		Params: map[string]interface{}{
 			"name":      "foldermcp_inspect",
@@ -286,34 +406,64 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 	if inspectResp.Error != nil {
 		t.Errorf("foldermcp_inspect error: %s", inspectResp.Error.Message)
 	} else {
-		respStr := string(inspectResp.Result)
-		t.Logf("inspect response length: %d bytes", len(respStr))
-		if !strings.Contains(respStr, "content") {
-			t.Errorf("inspect response missing 'content' field: %s", truncate(respStr, 500))
+		var env toolEnvelope
+		if err := json.Unmarshal(inspectResp.Result, &env); err != nil || env.IsError || len(env.Content) == 0 {
+			t.Errorf("inspect: bad envelope (err=%v): %s", err, truncate(string(inspectResp.Result), 500))
+		} else {
+			var p struct {
+				Status string `json:"status"`
+				Node   *struct {
+					NodeID int64  `json:"node_id"`
+					Path   string `json:"path"`
+				} `json:"node"`
+			}
+			if err := json.Unmarshal([]byte(env.Content[0].Text), &p); err != nil {
+				t.Errorf("inspect: parse payload: %v in %s", err, truncate(env.Content[0].Text, 500))
+			} else if p.Node == nil {
+				t.Errorf("inspect node_id=%d: nil node in payload %s", nodeID, truncate(env.Content[0].Text, 500))
+			} else {
+				t.Logf("inspect: node_id=%d path=%s", p.Node.NodeID, p.Node.Path)
+			}
 		}
 	}
 
-	// ── Step 2d: Call foldermcp_browse ──────────���────────
+	// ── Step 2d: Call foldermcp_browse ───────────────────
+	// Browse matches files.parent_dir exactly, so pass the absolute
+	// fixture subfolder. D28b D6: ≥1 child under code-go.
 	browseResp := sendJSONRPC(t, mcpStdin, scanner, jsonRPCRequest{
 		JSONRPC: "2.0",
-		ID:      4,
+		ID:      nextID(),
 		Method:  "tools/call",
 		Params: map[string]interface{}{
 			"name":      "foldermcp_browse",
-			"arguments": map[string]string{"path": "code-go"},
+			"arguments": map[string]string{"path": filepath.Join(microFixture, "code-go")},
 		},
 	})
 	if browseResp.Error != nil {
 		t.Errorf("foldermcp_browse error: %s", browseResp.Error.Message)
 	} else {
-		respStr := string(browseResp.Result)
-		t.Logf("browse response length: %d bytes", len(respStr))
-		if !strings.Contains(respStr, "content") {
-			t.Errorf("browse response missing 'content' field: %s", truncate(respStr, 500))
+		var env toolEnvelope
+		if err := json.Unmarshal(browseResp.Result, &env); err != nil || env.IsError || len(env.Content) == 0 {
+			t.Errorf("browse: bad envelope (err=%v): %s", err, truncate(string(browseResp.Result), 500))
+		} else {
+			var p struct {
+				Status  string `json:"status"`
+				Entries []struct {
+					Path string `json:"path"`
+					Name string `json:"name"`
+				} `json:"entries"`
+			}
+			if err := json.Unmarshal([]byte(env.Content[0].Text), &p); err != nil {
+				t.Errorf("browse: parse payload: %v in %s", err, truncate(env.Content[0].Text, 500))
+			} else if len(p.Entries) == 0 {
+				t.Errorf("browse code-go: 0 entries, want ≥ 1 (payload %s)", truncate(env.Content[0].Text, 500))
+			} else {
+				t.Logf("browse code-go: %d entries", len(p.Entries))
+			}
 		}
 	}
 
-	t.Log("smoke test complete: all 3 MCP tools responded")
+	t.Log("smoke test complete: all 3 MCP tools responded with tightened G37 assertions")
 }
 
 // truncate shortens a string for log output.
@@ -324,53 +474,3 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "...(truncated)"
 }
 
-// extractNodeID attempts to parse a node_id from an MCP search tool response.
-// The response Result contains a JSON array of content blocks; we look for
-// "node_id" in the text content. Falls back to 1 if parsing fails.
-func extractNodeID(t *testing.T, resp jsonRPCResponse) int {
-	t.Helper()
-	if resp.Error != nil || resp.Result == nil {
-		t.Log("extractNodeID: no result to parse, falling back to node_id=1")
-		return 1
-	}
-
-	// MCP tool results are: {"content": [{"type":"text","text":"..."}]}
-	var toolResult struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(resp.Result, &toolResult); err != nil {
-		t.Logf("extractNodeID: unmarshal failed: %v, falling back to node_id=1", err)
-		return 1
-	}
-
-	// Search the text content for a node_id field in JSON
-	for _, c := range toolResult.Content {
-		// Try to find "node_id": <number> in the text
-		var results []map[string]interface{}
-		if err := json.Unmarshal([]byte(c.Text), &results); err == nil {
-			for _, r := range results {
-				if id, ok := r["node_id"]; ok {
-					if idFloat, ok := id.(float64); ok && idFloat > 0 {
-						t.Logf("extractNodeID: found node_id=%d", int(idFloat))
-						return int(idFloat)
-					}
-				}
-			}
-		}
-		// Also try as a single object
-		var single map[string]interface{}
-		if err := json.Unmarshal([]byte(c.Text), &single); err == nil {
-			if id, ok := single["node_id"]; ok {
-				if idFloat, ok := id.(float64); ok && idFloat > 0 {
-					t.Logf("extractNodeID: found node_id=%d", int(idFloat))
-					return int(idFloat)
-				}
-			}
-		}
-	}
-
-	t.Log("extractNodeID: no node_id found in search results, falling back to 1")
-	return 1
-}

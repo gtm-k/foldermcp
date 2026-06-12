@@ -4,6 +4,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -53,6 +54,64 @@ func TestStatusReportsFileAndPassCounts(t *testing.T) {
 	}
 	if resp.UptimeSeconds < 10 {
 		t.Errorf("uptime = %d, want >= 10", resp.UptimeSeconds)
+	}
+}
+
+// TestStatusSurfacesFailureCounts (D28b.5, pre-mortem Story 2): failed
+// pipeline_state rows surface in pass_counts under synthetic
+// '<pass>_failed' integer keys — no proto change (D4). Fixture: 10
+// files, 8 fully indexed, 2 failed at the structural pass.
+func TestStatusSurfacesFailureCounts(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "st.db"), Tier: store.TierMid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(db, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i <= 10; i++ {
+		if _, err := db.Exec(`INSERT INTO files(path,sha256,size,mtime,mime,content_class,parent_dir,last_seen)
+			VALUES(?,X'AB',1,1,'text/markdown','document','/',1)`, fmt.Sprintf("/f%d.md", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Files 1–8 completed the terminal pass.
+	for i := 1; i <= 8; i++ {
+		if _, err := db.Exec(`INSERT INTO pipeline_state(file_id,pass_name,status,checkpoint_at)
+			VALUES(?,'embeddings','done',1)`, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Files 9–10 failed at structural.
+	for i := 9; i <= 10; i++ {
+		if _, err := db.Exec(`INSERT INTO pipeline_state(file_id,pass_name,status,checkpoint_at,error_message)
+			VALUES(?,'structural','failed',1,'extract: synthetic failure')`, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h := &Handler{DB: db}
+	resp, err := h.Status(context.Background(), &pb.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.PassCounts["structural_failed"] != 2 {
+		t.Errorf("pass_counts[structural_failed] = %d, want 2", resp.PassCounts["structural_failed"])
+	}
+	if resp.FilesIndexed != 8 {
+		t.Errorf("files_indexed = %d, want 8", resp.FilesIndexed)
+	}
+	if resp.PassCounts["embeddings"] != 8 {
+		t.Errorf("pass_counts[embeddings] = %d, want 8", resp.PassCounts["embeddings"])
+	}
+	// No spurious failure keys for passes without failures.
+	for _, k := range []string{"chunker_failed", "embeddings_failed"} {
+		if v, ok := resp.PassCounts[k]; ok {
+			t.Errorf("unexpected pass_counts[%s] = %d", k, v)
+		}
 	}
 }
 

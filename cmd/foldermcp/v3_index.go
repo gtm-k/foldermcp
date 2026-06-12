@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gtm-k/foldermcp/internal/v3/store"
-	"github.com/gtm-k/foldermcp/internal/v3/walker"
 )
 
 var v3IndexCmd = &cobra.Command{
@@ -48,12 +47,22 @@ func runV3Index(ctx context.Context, workspacePath string) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "foldermcp index: scanning %s\n", workspacePath)
-	n, err := walker.Walk(ctx, db, walker.Options{Root: workspacePath})
+	// D28b.3: full four-pass pipeline (walker → structural → chunker →
+	// embeddings) via pipeline.Runner — not just the walker.
+	configureOrtLib()
+	modelPath, tokenizerPath, err := resolveModelPaths()
 	if err != nil {
-		return fmt.Errorf("walk: %w", err)
+		return err
 	}
-	fmt.Fprintf(os.Stderr, "foldermcp index: walker found %d files\n", n)
+	runner, err := newV3Runner(db, modelPath, tokenizerPath)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "foldermcp index: indexing %s\n", workspacePath)
+	if err := runner.Run(ctx, workspacePath); err != nil {
+		return fmt.Errorf("index: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "foldermcp index: indexing complete\n")
 	return nil
 }
 

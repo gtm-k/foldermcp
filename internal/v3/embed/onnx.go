@@ -46,14 +46,41 @@ type Embedder struct {
 	initErr       error
 	modelPath     string
 	tokenizerPath string
+
+	// tokenizer is parsed once and cached (D28b-E2 follow-up A):
+	// EmbedQuery runs once per chunk on the Runner's hot path, and
+	// re-reading + re-parsing the ~450 KB tokenizer.json per call would
+	// dominate per-chunk cost.
+	tokOnce   sync.Once
+	tokenizer *Tokenizer
+	tokErr    error
 }
 
 func NewEmbedder(modelPath, tokenizerPath string) *Embedder {
 	return &Embedder{modelPath: modelPath, tokenizerPath: tokenizerPath}
 }
 
+// loadTokenizer loads and caches the WordPiece tokenizer. Safe to call
+// repeatedly; only the first call reads tokenizer.json.
+func (e *Embedder) loadTokenizer() (*Tokenizer, error) {
+	e.tokOnce.Do(func() {
+		e.tokenizer, e.tokErr = LoadTokenizer(e.tokenizerPath)
+	})
+	if e.tokErr != nil {
+		return nil, fmt.Errorf("load tokenizer: %w", e.tokErr)
+	}
+	return e.tokenizer, nil
+}
+
 func (e *Embedder) init() error {
 	e.once.Do(func() {
+		// Load the tokenizer first so Init() fails fast on a bad
+		// tokenizer path too, not only on a bad model/runtime — the
+		// Runner treats Init errors as fatal (pre-mortem Story 1).
+		if _, err := e.loadTokenizer(); err != nil {
+			e.initErr = err
+			return
+		}
 		if err := initOrtEnv(); err != nil {
 			e.initErr = fmt.Errorf("ort init: %w", err)
 			return
@@ -103,11 +130,11 @@ func (e *Embedder) init() error {
 	return e.initErr
 }
 
-// Init eagerly initializes the ONNX Runtime session. Exported wrapper
-// around the lazy init() (D28b D10) so the pipeline Runner can fail fast
-// on a bad model/tokenizer/runtime setup before entering the file loop
-// (pre-mortem Story 1) instead of swallowing the same init error on
-// every file via per-file recovery.
+// Init eagerly loads the WordPiece tokenizer and initializes the ONNX
+// Runtime session. Exported wrapper around the lazy init() (D28b D10) so
+// the pipeline Runner can fail fast on a bad model/tokenizer/runtime
+// setup before entering the file loop (pre-mortem Story 1) instead of
+// swallowing the same init error on every file via per-file recovery.
 func (e *Embedder) Init() error { return e.init() }
 
 // Embed runs inference on pre-tokenized inputs (batch=1) and returns

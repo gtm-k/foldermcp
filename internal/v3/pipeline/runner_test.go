@@ -462,15 +462,17 @@ func TestRunner_Sha256ChangeReprocesses(t *testing.T) {
 // the new chunk count exactly: no orphans, no duplicates.
 func TestReprocessLeavesNoOrphanedEmbeddings(t *testing.T) {
 	db := openTestDB(t)
-	long1 := strings.Repeat("alpha beta gamma delta epsilon zeta. ", 12)
-	long2 := strings.Repeat("omicron pi rho sigma. ", 9)
+	// Both fixtures exceed DefaultConfig().MaxTokens (260) under the wc
+	// counter → multiple chunks per file, so orphan and duplicate states
+	// are distinguishable from the happy path. (A custom small-budget
+	// Config is no longer possible here: the Runner's policy drift guard
+	// rejects any Cfg whose PolicyString differs from the fingerprint's.)
+	long1 := strings.Repeat("alpha beta gamma delta epsilon zeta. ", 100) // 600 words
+	long2 := strings.Repeat("omicron pi rho sigma kappa. ", 90)          // 450 words
 	dir := seedDir(t, map[string]string{"multi.md": long1})
 	ctx := context.Background()
 
 	r := newTestRunner(t, db)
-	// Small chunk budget → multiple chunks per file, so orphan and
-	// duplicate states are distinguishable from the happy path.
-	r.Cfg = chunker.Config{TargetTokens: 10, MinTokens: 3, MaxTokens: 15}
 
 	if err := r.Run(ctx, dir); err != nil {
 		t.Fatalf("first Run: %v", err)
@@ -499,5 +501,65 @@ func TestReprocessLeavesNoOrphanedEmbeddings(t *testing.T) {
 	}
 	if got := count(t, db, `SELECT COUNT(*) FROM embeddings e LEFT JOIN chunks c ON e.chunk_id = c.chunk_id WHERE c.chunk_id IS NULL`); got != 0 {
 		t.Errorf("%d orphaned embedding rows point at dead chunks", got)
+	}
+}
+
+// TestRunner_PolicyDriftGuard (D28b-E2 follow-up C, pre-mortem Story 3):
+// the Writer's fingerprint records chunker.DefaultConfig().PolicyString();
+// chunking under any other policy would persist chunks the fingerprint
+// misdescribes. Run must fail fast before touching the DB.
+func TestRunner_PolicyDriftGuard(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{"doc.md": mdFixture})
+	r := newTestRunner(t, db)
+	r.Cfg = chunker.Config{TargetTokens: 10, MinTokens: 3, MaxTokens: 15}
+
+	err := r.Run(context.Background(), dir)
+	if err == nil || !strings.Contains(err.Error(), "chunking policy") {
+		t.Fatalf("Run = %v, want chunking-policy drift error", err)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks`); got != 0 {
+		t.Errorf("%d chunks written under a drifted policy — guard must fire before any work", got)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM files`); got != 0 {
+		t.Errorf("%d file rows written — guard must fire before the walk", got)
+	}
+}
+
+// TestRunner_BinaryDocumentSkipped (D28b-E2 follow-up D): content_class
+// 'document' covers binary formats (.pdf/.docx/.odt) that M1 cannot
+// extract text from — routing their raw bytes through the prose chunker
+// produces garbage chunks. They must be marked skipped with the
+// 'binary_document_pending_m2' marker (M2 Phase 4 replaces this with
+// real PDF extraction); plain-text documents (.md/.txt/...) still chunk.
+func TestRunner_BinaryDocumentSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{
+		"report.pdf": "%PDF-1.4\n\xe2\xe3\xcf\xd3 binary garbage bytes that must never reach the prose chunker",
+		"notes.md":   mdFixture,
+	})
+	r := newTestRunner(t, db)
+
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	pdfID := fileIDByPathSuffix(t, db, "report.pdf")
+	for _, pass := range []string{"structural", "chunker", "embeddings"} {
+		var status, msg string
+		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, pdfID, pass).Scan(&status, &msg); err != nil {
+			t.Fatalf("read %s row: %v", pass, err)
+		}
+		if status != "skipped" || msg != "binary_document_pending_m2" {
+			t.Errorf("%s = (%q, %q), want (skipped, binary_document_pending_m2)", pass, status, msg)
+		}
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id = n.node_id WHERE n.file_id=?`, pdfID); got != 0 {
+		t.Errorf("binary document produced %d garbage chunks", got)
+	}
+	// The plain-text document still completes the full pipeline.
+	mdID := fileIDByPathSuffix(t, db, "notes.md")
+	if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, mdID); got != 1 {
+		t.Errorf("notes.md embeddings done = %d, want 1", got)
 	}
 }

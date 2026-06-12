@@ -40,6 +40,23 @@ SELECT pass_name, COUNT(*) FROM pipeline_state WHERE status='done' GROUP BY pass
 		}
 	}
 
+	// D28b.5 (pre-mortem Story 2): surface per-pass failure counts via
+	// synthetic '<pass>_failed' integer keys in the same map — no proto
+	// change (decision D4). The end-of-Run top-3 error-prefix histogram
+	// in pipeline.Runner carries the causes; these keys carry the rate.
+	frows, err := h.DB.QueryContext(ctx, `
+SELECT pass_name || '_failed', COUNT(*) FROM pipeline_state WHERE status='failed' GROUP BY pass_name`)
+	if err == nil {
+		defer func() { _ = frows.Close() }()
+		for frows.Next() {
+			var name string
+			var n int64
+			if err := frows.Scan(&name, &n); err == nil {
+				passCounts[name] = n
+			}
+		}
+	}
+
 	var uuid string
 	_ = h.DB.QueryRowContext(ctx, `SELECT value FROM config WHERE key='instance_uuid'`).Scan(&uuid)
 

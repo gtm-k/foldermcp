@@ -89,6 +89,13 @@ func (r *Runner) Run(ctx context.Context, root string) error {
 	if r.Cfg == (chunker.Config{}) {
 		r.Cfg = chunker.DefaultConfig()
 	}
+	// Policy drift guard (pre-mortem Story 3, D28b-E2 follow-up): the
+	// Writer's fingerprint records chunker.DefaultConfig().PolicyString().
+	// Chunking under any other policy would persist chunks the
+	// fingerprint misdescribes — fail fast before any work happens.
+	if want := chunker.DefaultConfig().PolicyString(); r.Cfg.PolicyString() != want {
+		return fmt.Errorf("runner init: chunking policy %q does not match fingerprint policy %q — embedding_fingerprint would misdescribe persisted chunks", r.Cfg.PolicyString(), want)
+	}
 	startTime := time.Now().Unix()
 	// Story 1 metric: grep-able start line before any per-file work.
 	logger.Info("runner: start", "root", root,
@@ -243,6 +250,21 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 	if f.ContentClass != "code" && f.ContentClass != "document" {
 		for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
 			if err = markStatusTx(ctx, tx, f.ID, p, StatusSkipped, ""); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Binary documents (D28b-E2 follow-up): content_class 'document'
+	// includes .pdf/.docx/.odt, whose raw bytes M1 cannot extract text
+	// from — routing them through the prose chunker produces garbage
+	// chunks. Skip with a grep-able marker; M2 Phase 4 replaces this
+	// with real PDF extraction. Plain-text documents (.md/.txt/.rst/...)
+	// fall through to prose chunking as before.
+	if f.ContentClass == "document" && isBinaryDocument(f.Path) {
+		for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
+			if err = markStatusTx(ctx, tx, f.ID, p, StatusSkipped, "binary_document_pending_m2"); err != nil {
 				return err
 			}
 		}
@@ -438,6 +460,19 @@ func (r *Runner) flushEmbedBatch(tx *sql.Tx) error {
 	}
 	r.embedBuf = r.embedBuf[:0]
 	return nil
+}
+
+// isBinaryDocument reports whether a 'document'-class file is a binary
+// container format the M1 pipeline cannot extract text from. The list
+// mirrors the binary subset of the walker's document classifier
+// (walker/mime.go): .pdf/.docx/.odt are binary; .md/.txt/.rst/.org/.tex
+// are plain text and chunk as prose.
+func isBinaryDocument(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".pdf", ".docx", ".odt":
+		return true
+	}
+	return false
 }
 
 // extractorFor selects the grammar for a code file by extension (§4.2.6).

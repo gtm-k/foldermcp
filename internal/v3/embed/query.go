@@ -6,11 +6,13 @@ import "fmt"
 
 // EmbedQuery tokenizes text, runs the ONNX model for batch=1,
 // mean-pools + L2-normalizes, quantizes to int8, and returns 384 bytes.
-// Called by SearchBroadly (Phase E) and by the retrieval harness (Phase G).
+// Called by SearchBroadly (Phase E), the retrieval harness (Phase G),
+// and per chunk by the pipeline Runner (D28b) — the tokenizer is cached
+// on the Embedder, so repeated calls do not reload tokenizer.json.
 func (e *Embedder) EmbedQuery(text string) ([]byte, error) {
-	tok, err := LoadTokenizer(e.tokenizerPath)
+	tok, err := e.loadTokenizer()
 	if err != nil {
-		return nil, fmt.Errorf("load tokenizer: %w", err)
+		return nil, err
 	}
 	ids, mask, tts := tok.Encode(text)
 
