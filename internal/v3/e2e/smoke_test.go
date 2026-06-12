@@ -33,6 +33,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gtm-k/foldermcp/internal/v3/store"
 )
 
 // findBinary locates the foldermcp binary. Checks:
@@ -384,6 +386,36 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 		}
 	}
 
+	// ── Step 2b': Phase 2 AC — non-zero chunks AND embeddings ─
+	// Command-level assertion (Codex E2 finding #1): open the store DB
+	// the all-v3 process wrote and count rows directly, so a pipeline
+	// that returns search hits without persisting chunks/embeddings
+	// cannot pass. store.Open registers sqlite-vec as an auto-extension
+	// at package init, which the embeddings vec0 virtual table needs.
+	storeDB, err := store.Open(store.Options{
+		Path:     filepath.Join(storeDir, "index.db"),
+		Tier:     store.TierMid,
+		ReadOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("open store db for count assertions: %v", err)
+	}
+	defer func() { _ = storeDB.Close() }()
+	var chunkCount, embeddingCount int
+	if err := storeDB.QueryRow(`SELECT COUNT(*) FROM chunks`).Scan(&chunkCount); err != nil {
+		t.Fatalf("SELECT COUNT(*) FROM chunks: %v", err)
+	}
+	if err := storeDB.QueryRow(`SELECT COUNT(*) FROM embeddings`).Scan(&embeddingCount); err != nil {
+		t.Fatalf("SELECT COUNT(*) FROM embeddings: %v", err)
+	}
+	if chunkCount == 0 {
+		t.Error("chunks count = 0, want > 0 (Phase 2 AC)")
+	}
+	if embeddingCount == 0 {
+		t.Error("embeddings count = 0, want > 0 (Phase 2 AC)")
+	}
+	t.Logf("store counts: chunks=%d embeddings=%d", chunkCount, embeddingCount)
+
 	// ── Step 2c: Call foldermcp_inspect ──────────────────
 	// node_id comes from m002's results (D28b D6). On a correctly wired
 	// pipeline the fallback must not fire; warn (don't fail) if it does,
@@ -463,7 +495,7 @@ func TestE2EAllSubcommandSmoke(t *testing.T) {
 		}
 	}
 
-	t.Log("smoke test complete: all 3 MCP tools responded with tightened G37 assertions")
+	t.Log("smoke test complete: all 3 MCP tools responded with tightened G37 assertions and non-zero store counts")
 }
 
 // truncate shortens a string for log output.
