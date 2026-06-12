@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/gtm-k/foldermcp/internal/v3/chunker"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
 )
 
@@ -28,10 +29,13 @@ func NewWriter(db *sql.DB) *Writer {
 	return &Writer{
 		db: db,
 		fp: store.Fingerprint{
-			ModelName:        ModelName,
-			ModelVersion:     ModelVersion,
-			Dimension:        Dimension,
-			ChunkingPolicy:   "recursive_180_220_v1",
+			ModelName:    ModelName,
+			ModelVersion: ModelVersion,
+			Dimension:    Dimension,
+			// Bound to the live chunker config (D28b D3, pre-mortem
+			// Story 3) — a chunk-size change cannot silently leave a
+			// stale policy label on persisted embeddings.
+			ChunkingPolicy:   chunker.DefaultConfig().PolicyString(),
 			QuantizationMode: "int8",
 		},
 	}

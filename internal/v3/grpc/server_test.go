@@ -53,8 +53,8 @@ func TestServerBootsAndAnswersCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.SchemaVersion != 1 {
-		t.Errorf("schema_version = %d", resp.SchemaVersion)
+	if resp.SchemaVersion != 2 {
+		t.Errorf("schema_version = %d, want 2", resp.SchemaVersion)
 	}
 	if resp.WireVersion != 1 {
 		t.Errorf("wire_version = %d", resp.WireVersion)

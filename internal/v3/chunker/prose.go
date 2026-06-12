@@ -3,6 +3,7 @@
 package chunker
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -33,6 +34,16 @@ type Config struct {
 // DefaultConfig returns the spec-recommended chunk sizes.
 func DefaultConfig() Config {
 	return Config{TargetTokens: 200, MinTokens: 80, MaxTokens: 260, OverlapToks: 30}
+}
+
+// PolicyString returns the canonical chunking-policy label persisted in
+// embedding_fingerprint. Deriving the label from Config fields makes
+// drift between the chunker numbers and the fingerprint structurally
+// impossible (D28b pre-mortem Story 3): any change to the chunk sizes
+// changes the label, which invalidates stale embeddings via the
+// fingerprint check instead of silently serving them.
+func (c Config) PolicyString() string {
+	return fmt.Sprintf("recursive_%d_%d_%d_v1", c.MinTokens, c.TargetTokens, c.MaxTokens)
 }
 
 // ChunkProse recursively splits text along paragraph/line/sentence/word

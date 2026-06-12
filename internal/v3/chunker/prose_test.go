@@ -62,6 +62,18 @@ func TestChunkProseParagraphBoundaries(t *testing.T) {
 	}
 }
 
+// TestChunkingPolicyBindsToFingerprint (D28b pre-mortem Story 3): the
+// fingerprint label written to embedding_fingerprint must be derived from
+// the live chunker Config. If someone changes DefaultConfig's sizes, this
+// assertion forces them to see that the policy label — and therefore the
+// stored-embeddings invalidation contract — changes with it.
+func TestChunkingPolicyBindsToFingerprint(t *testing.T) {
+	got := DefaultConfig().PolicyString()
+	if got != "recursive_80_200_260_v1" {
+		t.Errorf("PolicyString() = %q, want recursive_80_200_260_v1", got)
+	}
+}
+
 func TestChunkProseByteOffsetsSpanInput(t *testing.T) {
 	cfg := Config{TargetTokens: 5, MinTokens: 2, MaxTokens: 8, OverlapToks: 0}
 	text := "a b c d e f g h i j k l m n o"

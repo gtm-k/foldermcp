@@ -103,6 +103,13 @@ func (e *Embedder) init() error {
 	return e.initErr
 }
 
+// Init eagerly initializes the ONNX Runtime session. Exported wrapper
+// around the lazy init() (D28b D10) so the pipeline Runner can fail fast
+// on a bad model/tokenizer/runtime setup before entering the file loop
+// (pre-mortem Story 1) instead of swallowing the same init error on
+// every file via per-file recovery.
+func (e *Embedder) Init() error { return e.init() }
+
 // Embed runs inference on pre-tokenized inputs (batch=1) and returns
 // a 384-dim float32 vector after mean-pooling and L2 normalization.
 // All three input slices must be exactly MaxSeqLen (128) elements.
