@@ -66,10 +66,13 @@ func runV3All(ctx context.Context, workspacePath string) error {
 	configureOrtLib()
 	modelPath, tokenizerPath, modelErr := resolveModelPaths()
 
-	// Query-side embedder: a SEPARATE instance from the Runner's —
-	// embed.Embedder is not goroutine-safe, and the indexer goroutine
-	// runs concurrently with gRPC query handlers. Nil disables semantic
-	// search (server degrades to FTS + filename per spec §9.5).
+	// Query-side embedder: a SEPARATE instance from the Runner's, so the
+	// indexer goroutine never contends with gRPC query handlers for the
+	// per-instance EmbedQuery lock. Sharing this one instance ACROSS
+	// concurrent query handlers is safe: EmbedQuery is internally
+	// serialized (E2 review finding 1 — gRPC handles RPCs on per-request
+	// goroutines). Nil disables semantic search (server degrades to
+	// FTS + filename per spec §9.5).
 	var queryEmbedder *embed.Embedder
 	if modelErr != nil {
 		fmt.Fprintf(os.Stderr, "foldermcp all: WARNING semantic search disabled: %v\n", modelErr)

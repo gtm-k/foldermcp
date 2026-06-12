@@ -34,9 +34,19 @@ func initOrtEnv() error {
 
 // Embedder wraps an ONNX Runtime session for all-MiniLM-L6-v2 inference.
 // It pre-allocates input/output tensors and reuses them across calls.
-// Not goroutine-safe — callers must serialize access (the pipeline is
-// single-writer by design).
+// EmbedQuery is internally serialized (mu) and safe for concurrent use —
+// gRPC handles RPCs on per-request goroutines, so concurrent semantic
+// searches share one query Embedder (E2 review finding 1). Other methods
+// (Embed, Close) are NOT goroutine-safe: callers must serialize access
+// or go through EmbedQuery (the pipeline Runner is single-goroutine by
+// design and never contends).
 type Embedder struct {
+	// mu serializes EmbedQuery: Embed() does unsynchronized copy() into
+	// the shared pre-allocated ORT tensors plus session.Run() on C-backed
+	// memory — concurrent calls would corrupt embeddings or crash in cgo.
+	// Uncontended on the Runner's hot path (single goroutine), and the
+	// lock cost is noise next to ms-scale inference.
+	mu            sync.Mutex
 	once          sync.Once
 	session       *ort.AdvancedSession
 	inputIDs      *ort.Tensor[int64]

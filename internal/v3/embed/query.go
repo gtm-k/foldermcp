@@ -9,7 +9,15 @@ import "fmt"
 // Called by SearchBroadly (Phase E), the retrieval harness (Phase G),
 // and per chunk by the pipeline Runner (D28b) — the tokenizer is cached
 // on the Embedder, so repeated calls do not reload tokenizer.json.
+//
+// Safe for concurrent use: e.mu serializes tokenize+infer because the
+// underlying Embed() writes into shared pre-allocated ORT tensors
+// (E2 review finding 1 — concurrent gRPC search handlers share one
+// query Embedder).
 func (e *Embedder) EmbedQuery(text string) ([]byte, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	tok, err := e.loadTokenizer()
 	if err != nil {
 		return nil, err

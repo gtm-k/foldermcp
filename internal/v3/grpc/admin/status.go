@@ -6,6 +6,7 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"time"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
@@ -26,10 +27,17 @@ func (h *Handler) Status(ctx context.Context, _ *pb.StatusRequest) (*pb.StatusRe
 SELECT COUNT(DISTINCT file_id) FROM pipeline_state
 WHERE pass_name='embeddings' AND status='done'`).Scan(&indexed)
 
+	// Both pass-count queries log at WARN on failure instead of silently
+	// dropping counts from the payload (E2 review finding 3,
+	// actor-observability): a DB error here means per-pass progress and
+	// failure rates vanish from Status — exactly the signal an operator
+	// is querying for — so the degradation must be visible in the logs.
 	passCounts := map[string]int64{}
 	rows, err := h.DB.QueryContext(ctx, `
 SELECT pass_name, COUNT(*) FROM pipeline_state WHERE status='done' GROUP BY pass_name`)
-	if err == nil {
+	if err != nil {
+		slog.Warn("status: pass-count query failed — pass_counts omitted", "error", err)
+	} else {
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
 			var name string
@@ -37,6 +45,9 @@ SELECT pass_name, COUNT(*) FROM pipeline_state WHERE status='done' GROUP BY pass
 			if err := rows.Scan(&name, &n); err == nil {
 				passCounts[name] = n
 			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("status: pass-count iteration failed — pass_counts may be incomplete", "error", err)
 		}
 	}
 
@@ -46,7 +57,9 @@ SELECT pass_name, COUNT(*) FROM pipeline_state WHERE status='done' GROUP BY pass
 	// in pipeline.Runner carries the causes; these keys carry the rate.
 	frows, err := h.DB.QueryContext(ctx, `
 SELECT pass_name || '_failed', COUNT(*) FROM pipeline_state WHERE status='failed' GROUP BY pass_name`)
-	if err == nil {
+	if err != nil {
+		slog.Warn("status: failure-count query failed — '<pass>_failed' counts omitted", "error", err)
+	} else {
 		defer func() { _ = frows.Close() }()
 		for frows.Next() {
 			var name string
@@ -54,6 +67,9 @@ SELECT pass_name || '_failed', COUNT(*) FROM pipeline_state WHERE status='failed
 			if err := frows.Scan(&name, &n); err == nil {
 				passCounts[name] = n
 			}
+		}
+		if err := frows.Err(); err != nil {
+			slog.Warn("status: failure-count iteration failed — '<pass>_failed' counts may be incomplete", "error", err)
 		}
 	}
 

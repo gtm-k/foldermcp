@@ -93,8 +93,11 @@ func (r *Runner) Run(ctx context.Context, root string) error {
 	// Writer's fingerprint records chunker.DefaultConfig().PolicyString().
 	// Chunking under any other policy would persist chunks the
 	// fingerprint misdescribes — fail fast before any work happens.
-	if want := chunker.DefaultConfig().PolicyString(); r.Cfg.PolicyString() != want {
-		return fmt.Errorf("runner init: chunking policy %q does not match fingerprint policy %q — embedding_fingerprint would misdescribe persisted chunks", r.Cfg.PolicyString(), want)
+	// Full-struct equality (not PolicyString comparison) so fields the
+	// policy string omits — OverlapToks, unused in M1 but activated by
+	// M2 overlap — cannot drift past the guard (E2 review finding 2).
+	if r.Cfg != chunker.DefaultConfig() {
+		return fmt.Errorf("runner init: chunking config %+v does not match fingerprint config %+v — embedding_fingerprint would misdescribe persisted chunks", r.Cfg, chunker.DefaultConfig())
 	}
 	startTime := time.Now().Unix()
 	// Story 1 metric: grep-able start line before any per-file work.
@@ -262,6 +265,11 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 	// chunks. Skip with a grep-able marker; M2 Phase 4 replaces this
 	// with real PDF extraction. Plain-text documents (.md/.txt/.rst/...)
 	// fall through to prose chunking as before.
+	// M2 follow-up (E2 review finding 4): 'skipped' is not terminal in
+	// PendingFiles, so these files are re-walked through the defensive
+	// DELETEs + status upserts on every Run — negligible at fixture
+	// scale, linear in binary-doc count on a 1-TB workspace. Treat
+	// 'skipped' as terminal in the selector when M2 lands extraction.
 	if f.ContentClass == "document" && isBinaryDocument(f.Path) {
 		for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
 			if err = markStatusTx(ctx, tx, f.ID, p, StatusSkipped, "binary_document_pending_m2"); err != nil {

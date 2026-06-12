@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gtm-k/foldermcp/internal/v3/embed"
 	v3grpc "github.com/gtm-k/foldermcp/internal/v3/grpc"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
 )
@@ -49,7 +50,21 @@ func runV3Serve(ctx context.Context) error {
 	}
 	defer func() { _ = listener.Close() }()
 
-	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db})
+	// Query-side embedder, mirroring all-v3 (E2 review finding 5): before
+	// this wiring, serve-v3 silently ran lexical-only even with the model
+	// installed — a permanent degradation with no observable signal. Safe
+	// to share across concurrent gRPC handlers because EmbedQuery is
+	// internally serialized. Nil disables semantic search (server degrades
+	// to FTS + filename per spec §9.5) — and says so on stderr.
+	configureOrtLib()
+	var queryEmbedder *embed.Embedder
+	if modelPath, tokenizerPath, modelErr := resolveModelPaths(); modelErr != nil {
+		fmt.Fprintf(os.Stderr, "foldermcp serve: WARNING semantic search disabled: %v\n", modelErr)
+	} else {
+		queryEmbedder = embed.NewEmbedder(modelPath, tokenizerPath)
+	}
+
+	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db, Embedder: queryEmbedder})
 	fmt.Fprintf(os.Stderr, "foldermcp serve: listening on %s\n", sockPath)
 	return srv.Serve(ctx, listener)
 }

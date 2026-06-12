@@ -161,6 +161,18 @@ func TestConcurrentQueriesUnderLoad(t *testing.T) {
 		t.Fatalf("micro-fixture not found at %s", microFixture)
 	}
 
+	// E2 review finding 1: HOME is overridden below for isolation, so
+	// without FOLDERMCP_MODEL_DIR the server degrades to a nil Embedder
+	// and the 50 workers never hit the concurrent semantic path — the
+	// shared-Embedder race would be structurally invisible to this test.
+	// Fail (not skip) when the model is absent, mirroring smoke_test.go.
+	modelDir := filepath.Join(repoRoot, "internal", "v3", "embed", "model")
+	for _, f := range []string{"model.onnx", "tokenizer.json"} {
+		if _, err := os.Stat(filepath.Join(modelDir, f)); err != nil {
+			t.Fatalf("embedding model file %s missing in %s — run `make v3-fetch-model`", f, modelDir)
+		}
+	}
+
 	tmpDir := t.TempDir()
 	storeDir := filepath.Join(tmpDir, "store")
 	homeDir := filepath.Join(tmpDir, "home")
@@ -178,6 +190,7 @@ func TestConcurrentQueriesUnderLoad(t *testing.T) {
 		fmt.Sprintf("FOLDERMCP_STORE=%s", storeDir),
 		fmt.Sprintf("HOME=%s", homeDir),
 		fmt.Sprintf("USERPROFILE=%s", homeDir),
+		fmt.Sprintf("FOLDERMCP_MODEL_DIR=%s", modelDir),
 	)
 	allCmd.Stderr = os.Stderr
 	if err := allCmd.Start(); err != nil {

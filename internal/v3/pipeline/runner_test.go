@@ -466,7 +466,7 @@ func TestReprocessLeavesNoOrphanedEmbeddings(t *testing.T) {
 	// counter → multiple chunks per file, so orphan and duplicate states
 	// are distinguishable from the happy path. (A custom small-budget
 	// Config is no longer possible here: the Runner's policy drift guard
-	// rejects any Cfg whose PolicyString differs from the fingerprint's.)
+	// rejects any Cfg that differs from chunker.DefaultConfig().)
 	long1 := strings.Repeat("alpha beta gamma delta epsilon zeta. ", 100) // 600 words
 	long2 := strings.Repeat("omicron pi rho sigma kappa. ", 90)          // 450 words
 	dir := seedDir(t, map[string]string{"multi.md": long1})
@@ -507,22 +507,34 @@ func TestReprocessLeavesNoOrphanedEmbeddings(t *testing.T) {
 // TestRunner_PolicyDriftGuard (D28b-E2 follow-up C, pre-mortem Story 3):
 // the Writer's fingerprint records chunker.DefaultConfig().PolicyString();
 // chunking under any other policy would persist chunks the fingerprint
-// misdescribes. Run must fail fast before touching the DB.
+// misdescribes. Run must fail fast before touching the DB. The guard
+// compares the full Config struct (E2 review finding 2), so drift in
+// fields PolicyString omits — OverlapToks, activated by M2 — is caught
+// too; both drift shapes are exercised below.
 func TestRunner_PolicyDriftGuard(t *testing.T) {
-	db := openTestDB(t)
-	dir := seedDir(t, map[string]string{"doc.md": mdFixture})
-	r := newTestRunner(t, db)
-	r.Cfg = chunker.Config{TargetTokens: 10, MinTokens: 3, MaxTokens: 15}
+	overlapOnly := chunker.DefaultConfig()
+	overlapOnly.OverlapToks = 0 // invisible to PolicyString — full-struct guard must still catch it
+	for name, cfg := range map[string]chunker.Config{
+		"token_budget_drift": {TargetTokens: 10, MinTokens: 3, MaxTokens: 15},
+		"overlap_only_drift": overlapOnly,
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := openTestDB(t)
+			dir := seedDir(t, map[string]string{"doc.md": mdFixture})
+			r := newTestRunner(t, db)
+			r.Cfg = cfg
 
-	err := r.Run(context.Background(), dir)
-	if err == nil || !strings.Contains(err.Error(), "chunking policy") {
-		t.Fatalf("Run = %v, want chunking-policy drift error", err)
-	}
-	if got := count(t, db, `SELECT COUNT(*) FROM chunks`); got != 0 {
-		t.Errorf("%d chunks written under a drifted policy — guard must fire before any work", got)
-	}
-	if got := count(t, db, `SELECT COUNT(*) FROM files`); got != 0 {
-		t.Errorf("%d file rows written — guard must fire before the walk", got)
+			err := r.Run(context.Background(), dir)
+			if err == nil || !strings.Contains(err.Error(), "chunking config") {
+				t.Fatalf("Run = %v, want chunking-config drift error", err)
+			}
+			if got := count(t, db, `SELECT COUNT(*) FROM chunks`); got != 0 {
+				t.Errorf("%d chunks written under a drifted policy — guard must fire before any work", got)
+			}
+			if got := count(t, db, `SELECT COUNT(*) FROM files`); got != 0 {
+				t.Errorf("%d file rows written — guard must fire before the walk", got)
+			}
+		})
 	}
 }
 
