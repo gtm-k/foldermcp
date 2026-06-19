@@ -66,3 +66,6 @@ integration_cross_test.go
 # ONNX model files (large, downloaded at build time)
 internal/v3/embed/model/model.onnx
 internal/v3/embed/model/tokenizer.json
+
+# Packaging caches (downloaded ONNX runtime, staged sqlite headers)
+/.cache/

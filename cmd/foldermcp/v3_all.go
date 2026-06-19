@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -109,12 +110,40 @@ func runV3All(ctx context.Context, workspacePath string) error {
 	return srv.Serve(ctx, listener)
 }
 
-// resolveModelPaths returns the model.onnx and tokenizer.json paths for
-// the all-MiniLM-L6-v2 embedding model: $FOLDERMCP_MODEL_DIR if set,
-// else ~/.foldermcp/models/all-MiniLM-L6-v2. An error means the model
-// files are absent — callers decide whether that is fatal.
+// exeDir returns the directory of the running executable, or "" if it cannot
+// be determined. Used to locate bundled dependencies (ONNX lib, model) shipped
+// alongside the binary in a self-contained archive.
+func exeDir() string {
+	p, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(p)
+}
+
+// resolveModelPaths returns the model.onnx and tokenizer.json paths for the
+// all-MiniLM-L6-v2 embedding model, in priority order:
+//  1. $FOLDERMCP_MODEL_DIR if set,
+//  2. a "model/" directory beside the executable (self-contained release bundle),
+//  3. ~/.foldermcp/models/all-MiniLM-L6-v2.
+//
+// An error means the model files are absent — callers decide whether that is
+// fatal.
 func resolveModelPaths() (modelPath, tokenizerPath string, err error) {
 	modelDir := os.Getenv("FOLDERMCP_MODEL_DIR")
+	if modelDir == "" {
+		if d := exeDir(); d != "" {
+			cand := filepath.Join(d, "model")
+			// Require BOTH files beside the executable before committing to the
+			// bundle dir — otherwise a partial bundle would block the home-dir
+			// fallback and hard-error (Codex review).
+			_, e1 := os.Stat(filepath.Join(cand, "model.onnx"))
+			_, e2 := os.Stat(filepath.Join(cand, "tokenizer.json"))
+			if e1 == nil && e2 == nil {
+				modelDir = cand
+			}
+		}
+	}
 	if modelDir == "" {
 		home, _ := os.UserHomeDir()
 		modelDir = filepath.Join(home, ".foldermcp", "models", "all-MiniLM-L6-v2")
@@ -129,13 +158,41 @@ func resolveModelPaths() (modelPath, tokenizerPath string, err error) {
 	return modelPath, tokenizerPath, nil
 }
 
-// configureOrtLib points onnxruntime_go at a non-default ONNX Runtime
-// shared library when FOLDERMCP_ORT_LIB is set (e.g.
-// /usr/local/lib/libonnxruntime.so.1.24.1). The library's default is
-// dlopen("onnxruntime.so") via the system search path. Must be called
-// before the first Embedder init in the process.
+// configureOrtLib points onnxruntime_go at the ONNX Runtime shared library, in
+// priority order:
+//  1. $FOLDERMCP_ORT_LIB if set,
+//  2. an onnxruntime shared lib beside the executable (self-contained bundle),
+//  3. otherwise the library's default dlopen("onnxruntime.so") via the system
+//     search path (Linux with a system install).
+//
+// Must be called before the first Embedder init in the process.
+//
+// Trust note: the exe-relative lookup assumes the install directory is no less
+// trusted than the executable itself (single-user bundle). In a shared install
+// dir that is writable by a lower-privileged principal than the binary's owner,
+// prefer setting FOLDERMCP_ORT_LIB to a vetted absolute path.
 func configureOrtLib() {
-	if lib := os.Getenv("FOLDERMCP_ORT_LIB"); lib != "" {
+	lib := os.Getenv("FOLDERMCP_ORT_LIB")
+	if lib == "" {
+		if d := exeDir(); d != "" {
+			// Only the platform-correct library name, so a stray Windows DLL
+			// left beside a Linux/macOS binary is never selected (Codex review).
+			var name string
+			switch runtime.GOOS {
+			case "windows":
+				name = "onnxruntime.dll"
+			case "darwin":
+				name = "libonnxruntime.dylib"
+			default:
+				name = "libonnxruntime.so"
+			}
+			cand := filepath.Join(d, name)
+			if _, statErr := os.Stat(cand); statErr == nil {
+				lib = cand
+			}
+		}
+	}
+	if lib != "" {
 		ort.SetSharedLibraryPath(lib)
 	}
 }

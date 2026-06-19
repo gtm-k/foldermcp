@@ -50,6 +50,12 @@ v3-proto:
 	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
 	       internal/v3/proto/foldermcp.proto
 
+.PHONY: v3-package-windows
+
+## v3-package-windows: Build a self-contained Windows release bundle (binary + ONNX DLLs + model) as dist/foldermcp-windows-amd64.zip. Needs mingw-w64, curl, python3.
+v3-package-windows:
+	bash scripts/package-windows.sh
+
 V3_MODEL_DIR=internal/v3/embed/model
 
 ## v3-fetch-model: Download all-MiniLM-L6-v2 ONNX model and tokenizer
