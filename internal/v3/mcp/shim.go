@@ -5,10 +5,9 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/gtm-k/foldermcp/internal/v3/router"
+	"github.com/gtm-k/foldermcp/internal/v3/transport"
 	"github.com/mark3labs/mcp-go/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,12 +23,14 @@ type Shim struct {
 // NewShim dials the local serve Unix socket and wires up the MCP stdio server.
 // The gRPC connection is lazy — errors surface at first tool call, not here.
 func NewShim(ctx context.Context) (*Shim, error) {
-	sockPath := defaultSocketPath()
+	sockPath := transport.DefaultSocketPath()
 
-	conn, err := grpc.NewClient(
-		"unix:"+sockPath,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	// transport.DialOptions yields a Unix-socket target on Unix/macOS and a
+	// named-pipe context dialer on Windows, so the shim connects the same way
+	// the daemon listens on each platform.
+	target, dialOpts := transport.DialOptions(sockPath)
+	opts := append([]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, dialOpts...)
+	conn, err := grpc.NewClient(target, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("grpc client for %s: %w", sockPath, err)
 	}
@@ -55,12 +56,4 @@ func (s *Shim) Close() error {
 		return s.conn.Close()
 	}
 	return nil
-}
-
-func defaultSocketPath() string {
-	if v := os.Getenv("FOLDERMCP_SOCKET"); v != "" {
-		return v
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".foldermcp", "run", "serve.sock")
 }

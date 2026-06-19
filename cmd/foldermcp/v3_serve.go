@@ -15,6 +15,7 @@ import (
 	"github.com/gtm-k/foldermcp/internal/v3/embed"
 	v3grpc "github.com/gtm-k/foldermcp/internal/v3/grpc"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
+	"github.com/gtm-k/foldermcp/internal/v3/transport"
 )
 
 var v3ServeCmd = &cobra.Command{
@@ -41,10 +42,9 @@ func runV3Serve(ctx context.Context) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	home, _ := os.UserHomeDir()
-	sockPath := filepath.Join(home, ".foldermcp", "run", "serve.sock")
+	sockPath := transport.DefaultSocketPath()
 
-	listener, err := v3grpc.ListenUnixSocket(sockPath)
+	listener, err := transport.Listen(sockPath)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

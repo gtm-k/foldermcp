@@ -1,6 +1,6 @@
-//go:build cgo && !windows
+//go:build !windows
 
-package grpc
+package transport
 
 import (
 	"os"
@@ -8,11 +8,10 @@ import (
 	"testing"
 )
 
-func TestListenUnixSocketMode0600(t *testing.T) {
-	tmp := t.TempDir()
-	p := filepath.Join(tmp, "sock")
-
-	l, err := ListenUnixSocket(p)
+// TestListenSocketMode0600 verifies the Unix socket is created owner-only.
+func TestListenSocketMode0600(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sock")
+	l, err := Listen(p)
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -27,11 +26,10 @@ func TestListenUnixSocketMode0600(t *testing.T) {
 	}
 }
 
-func TestListenUnixSocketCreatesDir(t *testing.T) {
-	tmp := t.TempDir()
-	p := filepath.Join(tmp, "nested", "dir", "sock")
-
-	l, err := ListenUnixSocket(p)
+// TestListenCreatesDir verifies the socket's parent directory is created 0700.
+func TestListenCreatesDir(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "nested", "dir", "sock")
+	l, err := Listen(p)
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}

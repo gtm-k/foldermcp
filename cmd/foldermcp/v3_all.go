@@ -21,6 +21,7 @@ import (
 	v3grpc "github.com/gtm-k/foldermcp/internal/v3/grpc"
 	"github.com/gtm-k/foldermcp/internal/v3/pipeline"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
+	"github.com/gtm-k/foldermcp/internal/v3/transport"
 )
 
 var v3AllCmd = &cobra.Command{
@@ -55,9 +56,8 @@ func runV3All(ctx context.Context, workspacePath string) error {
 		return err
 	}
 
-	home, _ := os.UserHomeDir()
-	sockPath := filepath.Join(home, ".foldermcp", "run", "serve.sock")
-	listener, err := v3grpc.ListenUnixSocket(sockPath)
+	sockPath := transport.DefaultSocketPath()
+	listener, err := transport.Listen(sockPath)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

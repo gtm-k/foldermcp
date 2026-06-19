@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/getkin/kin-openapi v0.134.0
 	github.com/gobwas/glob v0.2.3
@@ -16,6 +17,7 @@ require (
 	github.com/tree-sitter/tree-sitter-go v0.25.0
 	github.com/tree-sitter/tree-sitter-python v0.25.0
 	github.com/yalue/onnxruntime_go v1.27.0
+	go.uber.org/goleak v1.3.0
 	golang.org/x/sys v0.42.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
@@ -44,7 +46,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	go.uber.org/goleak v1.3.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
