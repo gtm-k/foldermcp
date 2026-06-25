@@ -4,12 +4,14 @@ package chunker
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ExtractedChunk is a chunk produced by a binary-document extractor (PDF via
@@ -45,6 +47,27 @@ var (
 	// ErrDependencyMissing means the external extractor binary (pdftotext) is
 	// not on PATH. Surfaced as error_message='dependency:pdftotext'.
 	ErrDependencyMissing = errors.New("dependency:pdftotext")
+	// ErrExtractionEmpty means a binary-document extractor SUCCEEDED but yielded
+	// ZERO chunks (a PDF whose pdftotext output is only form-feeds/whitespace, or
+	// a docx/odt with no text). Distinct from ErrExtractionQuality (which means
+	// the document had text but too little to be digital-native): empty means
+	// there is literally nothing to index, so the file must be marked failed
+	// rather than silently counted done-with-zero-chunks and dropped from
+	// PendingFiles forever (F1). Surfaced as error_message='extraction_empty'.
+	ErrExtractionEmpty = errors.New("extraction_empty")
+	// ErrExtractionTimeout means the extractor subprocess exceeded its per-file
+	// deadline (a malformed/huge PDF can hang pdftotext). Surfaced as
+	// error_message='extraction_timeout'.
+	ErrExtractionTimeout = errors.New("extraction_timeout")
+	// ErrExtractionOversize means the extractor's stdout exceeded the byte cap
+	// (a PDF that expands to gigabytes of text would OOM the single-goroutine
+	// indexer). Surfaced as error_message='extraction_oversize'.
+	ErrExtractionOversize = errors.New("extraction_oversize")
+	// ErrTooManyChunks means a single document produced more chunks than the
+	// per-document cap (one large docx of tiny paragraphs can mint 100k+
+	// chunks+embeddings in a single transaction). Surfaced as
+	// error_message='too_many_chunks'.
+	ErrTooManyChunks = errors.New("too_many_chunks")
 )
 
 const (
@@ -57,6 +80,24 @@ const (
 	minCharsPerPage = 200
 	// formFeed is the page separator pdftotext emits between pages.
 	formFeed = '\f'
+	// extractTimeout caps a single pdftotext invocation (F2). A malformed or
+	// pathological PDF can make poppler spin forever; the single-goroutine
+	// indexer would then hang on one file. 60s is generous for any real
+	// digital-native document yet bounds the worst case. Overridable later via
+	// config if a corpus needs it.
+	extractTimeout = 60 * time.Second
+	// maxExtractedTextBytes caps the stdout we buffer from an extractor (F2). A
+	// decompression-bomb PDF can expand to gigabytes of text and OOM the
+	// single-goroutine indexer. 128 MB is ~4x the 32 MB per-file source read cap
+	// — comfortably above any legitimate document's extracted text while still
+	// bounding memory.
+	maxExtractedTextBytes = 128 * 1024 * 1024
+	// maxChunksPerDoc caps the chunks one document may mint (F3). A 30 MB docx of
+	// tiny paragraphs can produce 100k+ chunks+embeddings in a single
+	// transaction, blowing out memory and the embedding budget. 10000 chunks is
+	// far beyond any real document (a 1000-page book chunks to a few thousand)
+	// yet bounds the pathological case.
+	maxChunksPerDoc = 10000
 )
 
 // PDFConfig configures PDF extraction. PdftotextPath overrides binary discovery
@@ -90,24 +131,77 @@ func PdftotextAvailable(cfg PDFConfig) bool {
 	return err == nil
 }
 
-// extractPDFText runs `pdftotext -layout <path> -` once and returns the
+// cappedBuffer is an io.Writer that accumulates up to limit bytes and then
+// reports overflow (F2). It never grows unbounded, so a decompression-bomb PDF
+// cannot OOM the indexer: once the cap is hit we stop copying and surface
+// ErrExtractionOversize.
+type cappedBuffer struct {
+	buf      bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.overflow {
+		// Pretend to consume so the child's pipe never blocks; we will kill it.
+		return len(p), nil
+	}
+	remaining := c.limit - c.buf.Len()
+	if len(p) > remaining {
+		c.buf.Write(p[:remaining])
+		c.overflow = true
+		return len(p), nil
+	}
+	return c.buf.Write(p)
+}
+
+// extractPDFText runs `pdftotext -layout -- <path> -` once and returns the
 // extracted text (form-feed page separators preserved). Zero network calls —
-// it is a local subprocess. Returns ErrDependencyMissing if the binary is
-// absent so the runner can mark the file failed visibly.
-func extractPDFText(path string, cfg PDFConfig) (string, error) {
+// it is a local subprocess. ctx is threaded so the runner can cancel, and a
+// per-file timeout bounds a pathological PDF (F2). stdout is bounded to
+// maxExtractedTextBytes (F2). The "--" terminator (F6) stops a path beginning
+// with "-" from being parsed as a pdftotext flag (argument injection). Returns:
+//   - ErrDependencyMissing if the binary is absent,
+//   - ErrExtractionTimeout if the subprocess exceeds extractTimeout,
+//   - ErrExtractionOversize if stdout exceeds the byte cap,
+//
+// so the runner can mark the file failed visibly under each marker.
+func extractPDFText(ctx context.Context, path string, cfg PDFConfig) (string, error) {
 	bin, err := pdftotextBinary(cfg)
 	if err != nil {
 		return "", err
 	}
-	// -layout preserves the physical layout; "-" writes to stdout.
-	cmd := exec.Command(bin, "-layout", path, "-")
-	var out, stderr bytes.Buffer
-	cmd.Stdout = &out
+	ctx, cancel := context.WithTimeout(ctx, extractTimeout)
+	defer cancel()
+
+	// -layout preserves the physical layout; "--" ends option parsing (F6) so a
+	// "-"-leading path is treated as a path; "-" writes to stdout.
+	cmd := exec.CommandContext(ctx, bin, "-layout", "--", path, "-")
+	out := &cappedBuffer{limit: maxExtractedTextBytes}
+	var stderr bytes.Buffer
+	cmd.Stdout = out
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("pdftotext %s: %w (%s)", path, err, strings.TrimSpace(stderr.String()))
+	// WaitDelay ensures that when the context is cancelled (timeout) and the
+	// process is killed, Wait still returns promptly even if the child left a
+	// pipe open — otherwise a wedged child could block us indefinitely.
+	cmd.WaitDelay = 5 * time.Second
+
+	runErr := cmd.Run()
+	if out.overflow {
+		return "", fmt.Errorf("pdftotext %s: %w (>%d bytes)", path, ErrExtractionOversize, maxExtractedTextBytes)
 	}
-	return out.String(), nil
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "", fmt.Errorf("pdftotext %s: %w (>%s)", path, ErrExtractionTimeout, extractTimeout)
+	}
+	if runErr != nil {
+		// Propagate caller cancellation as the context error (not a per-file
+		// extraction failure) so the runner treats it as a shutdown, not a bad file.
+		if cerr := ctx.Err(); errors.Is(cerr, context.Canceled) {
+			return "", cerr
+		}
+		return "", fmt.Errorf("pdftotext %s: %w (%s)", path, runErr, strings.TrimSpace(stderr.String()))
+	}
+	return out.buf.String(), nil
 }
 
 // ChunkPDF extracts text from a PDF and produces page-anchored prose chunks.
@@ -119,8 +213,8 @@ func extractPDFText(path string, cfg PDFConfig) (string, error) {
 // <title>" and byte offsets relative to the full extracted text. No chunk's byte
 // range ever crosses a form-feed boundary (each page is chunked independently
 // over its own slice of the extracted text).
-func ChunkPDF(path, title string, cfg Config, counter Counter, pdfCfg PDFConfig) ([]ExtractedChunk, ExtractStats, error) {
-	text, err := extractPDFText(path, pdfCfg)
+func ChunkPDF(ctx context.Context, path, title string, cfg Config, counter Counter, pdfCfg PDFConfig) ([]ExtractedChunk, ExtractStats, error) {
+	text, err := extractPDFText(ctx, path, pdfCfg)
 	if err != nil {
 		return nil, ExtractStats{}, err
 	}
@@ -178,6 +272,14 @@ func chunkExtractedPages(text, title, extractorVersion string, cfg Config, count
 					TokenCount: pc.TokenCount,
 					Header:     fmt.Sprintf("p%d¶%d — %s", pageNum, paraNum, title),
 				})
+				// Per-document chunk cap (F3): bound the chunks+embeddings one
+				// document can mint in a single transaction. Surface a marker
+				// rather than minting 100k+ rows. Checked inside the inner loop so
+				// we stop as soon as the cap is crossed, never building the full
+				// pathological slice first.
+				if len(out) > maxChunksPerDoc {
+					return nil, stats, fmt.Errorf("%w (>%d)", ErrTooManyChunks, maxChunksPerDoc)
+				}
 			}
 		}
 	}
@@ -186,9 +288,19 @@ func chunkExtractedPages(text, title, extractorVersion string, cfg Config, count
 	stats.CharsPerPageMedian = median(charCounts)
 
 	// Digital-native quality gate (D18): an image-only PDF extracts almost no
-	// text; flag it visibly rather than indexing an empty document.
+	// text; flag it visibly rather than indexing an empty document. Applies only
+	// to PDFs that actually had pages (pageNum > 0) and produced text — a
+	// truly-empty extraction is handled by the zero-chunk guard below.
 	if qualityGate && pageNum > 0 && stats.CharsPerPageMedian < minCharsPerPage {
 		return nil, stats, ErrExtractionQuality
+	}
+	// Zero-chunk guard (F1): a successful extraction that yields NO chunks (a PDF
+	// whose text is only form-feeds/whitespace so pageNum==0 and the quality gate
+	// is skipped; an office doc with no text since office passes qualityGate=false)
+	// must fail observably. Otherwise the file is marked done with zero chunks,
+	// counted indexed, removed from PendingFiles forever, and silently unsearchable.
+	if len(out) == 0 {
+		return nil, stats, ErrExtractionEmpty
 	}
 	return out, stats, nil
 }

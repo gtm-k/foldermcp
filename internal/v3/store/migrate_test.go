@@ -421,13 +421,35 @@ func TestMigration0004UpgradeFromPopulatedV3(t *testing.T) {
 	// Capture pre-upgrade invariants.
 	beforeCount := countRows(t, db, `SELECT COUNT(*) FROM chunks`)
 	beforeEmb := countRows(t, db, `SELECT COUNT(*) FROM embeddings`)
+	// F10: capture the ORDERED rowid set per probe, not just the hit count — equal
+	// counts with different rowids (a rebuild that re-pointed FTS at wrong chunks)
+	// would slip past a count-only check.
 	probes := []string{"alpha", "charlie", "delta"}
-	beforeHits := make(map[string]int, len(probes))
+	beforeHitRowids := make(map[string][]int64, len(probes))
 	for _, p := range probes {
-		beforeHits[p] = countRows(t, db, `SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, p)
-		if beforeHits[p] == 0 {
+		beforeHitRowids[p] = ftsHitRowids(t, db, p)
+		if len(beforeHitRowids[p]) == 0 {
 			t.Fatalf("pre-upgrade probe %q had 0 FTS hits — bad fixture", p)
 		}
+	}
+
+	// F8: seed ONE genuine orphan embedding — a chunk_id that does NOT exist in
+	// chunks — so the migration's D13 orphan-sweep DELETE is actually exercised.
+	// Without a planted orphan the "zero orphaned embeddings" assertion is vacuous
+	// (the seeded chain never produces one). 999999 is far above any minted
+	// chunk_id (the seeds above use small autoincrement ids).
+	const orphanChunkID = 999999
+	if got := countRows(t, db, `SELECT COUNT(*) FROM chunks WHERE chunk_id=?`, orphanChunkID); got != 0 {
+		t.Fatalf("precondition: chunk_id %d unexpectedly exists", orphanChunkID)
+	}
+	if _, err := db.Exec(`INSERT INTO embeddings(chunk_id, embedding) VALUES(?, vec_int8(?))`, orphanChunkID, make([]byte, 384)); err != nil {
+		t.Fatalf("seed orphan embedding: %v", err)
+	}
+	// embeddings now = beforeEmb legit + 1 orphan; the migration must delete the
+	// orphan and keep every legit row.
+	legitEmb := beforeEmb
+	if got := countRows(t, db, `SELECT COUNT(*) FROM embeddings`); got != legitEmb+1 {
+		t.Fatalf("after seeding orphan: embeddings = %d, want %d", got, legitEmb+1)
 	}
 
 	// Upgrade: applies ONLY 0004 (current=3), exercising the chunks rebuild.
@@ -482,21 +504,28 @@ func TestMigration0004UpgradeFromPopulatedV3(t *testing.T) {
 	if fkViolations != 0 {
 		t.Errorf("foreign_key_check returned %d rows, want 0", fkViolations)
 	}
-	// Zero orphaned embeddings; embedding count preserved (no chunk_ids dropped).
+	// F8: the planted orphan must be GONE (the D13 sweep's one deleting statement
+	// actually ran), and every LEGITIMATE embedding must survive — surviving count
+	// == legitEmb exactly, the planted orphan being the only deletion.
+	if got := countRows(t, db, `SELECT COUNT(*) FROM embeddings WHERE chunk_id=?`, orphanChunkID); got != 0 {
+		t.Errorf("planted orphan embedding (chunk_id %d) survived 0004 — orphan sweep did not run", orphanChunkID)
+	}
 	if got := countRows(t, db, `SELECT COUNT(*) FROM embeddings WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks)`); got != 0 {
 		t.Errorf("orphaned embeddings = %d, want 0", got)
 	}
-	if got := countRows(t, db, `SELECT COUNT(*) FROM embeddings`); got != beforeEmb {
-		t.Errorf("embedding count changed across 0004: %d → %d", beforeEmb, got)
+	if got := countRows(t, db, `SELECT COUNT(*) FROM embeddings`); got != legitEmb {
+		t.Errorf("legit embedding count not preserved across 0004: %d, want %d (orphan should be the only deletion)", got, legitEmb)
 	}
 	// FTS integrity-check passes (raises on corruption).
 	if _, err := db.Exec(`INSERT INTO chunks_fts(chunks_fts, rank) VALUES('integrity-check', 1)`); err != nil {
 		t.Errorf("FTS integrity-check failed after 0004: %v", err)
 	}
-	// Identical FTS hit-set for the probe queries.
+	// F10: identical FTS hit-set (ordered rowid slice) for the probe queries —
+	// not just equal counts. Wrong rowids with the same count would fail here.
 	for _, p := range probes {
-		if got := countRows(t, db, `SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, p); got != beforeHits[p] {
-			t.Errorf("FTS hits for %q: %d → %d across rebuild", p, beforeHits[p], got)
+		got := ftsHitRowids(t, db, p)
+		if !equalInt64Slices(got, beforeHitRowids[p]) {
+			t.Errorf("FTS rowid set for %q changed across rebuild: %v → %v", p, beforeHitRowids[p], got)
 		}
 	}
 	// The new kinds are now insertable (the whole point of the migration).
@@ -506,6 +535,42 @@ func TestMigration0004UpgradeFromPopulatedV3(t *testing.T) {
 	if got := countRows(t, db, `SELECT COUNT(*) FROM chunks WHERE chunk_kind IN ('office_text','csv_schema','csv_rows','data_structured')`); got != len(newChunkKinds) {
 		t.Errorf("new-kind chunks = %d, want %d", got, len(newChunkKinds))
 	}
+}
+
+// ftsHitRowids returns the rowids matching an FTS probe term in ascending order
+// (F10) so the migration test can compare the exact hit-SET pre/post-rebuild,
+// not merely the hit count.
+func ftsHitRowids(t *testing.T, db *sql.DB, term string) []int64 {
+	t.Helper()
+	rows, err := db.Query(`SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rowid`, term)
+	if err != nil {
+		t.Fatalf("fts rowids for %q: %v", term, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan fts rowid for %q: %v", term, err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("fts rowid rows for %q: %v", term, err)
+	}
+	return out
+}
+
+func equalInt64Slices(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func countRows(t *testing.T, db *sql.DB, query string, args ...any) int {

@@ -40,6 +40,15 @@ const (
 	// memory and dominate the 1-TB budget (pre-mortem Story 2 includes a
 	// 40 MB generated .py file as a failure class).
 	maxReadBytes = 32 * 1024 * 1024 // 32 MB — covers ~99% of real code/prose
+	// maxDocumentBytes caps the on-disk size of a binary document (.pdf/.docx/.odt)
+	// before any extractor touches it (F3). Routing dispatches binary documents
+	// BEFORE readFileContent, so the text path's maxReadBytes never applies to
+	// them — a multi-GB PDF would otherwise be handed straight to poppler, and a
+	// huge ZIP straight to archive/zip. 64 MB is 2x the 32 MB source-text cap (a
+	// compressed container legitimately holds more bytes-on-disk per byte-of-text
+	// than a flat text file, so a slightly higher cap than maxReadBytes is
+	// defensible) while still bounding the input an extractor sees.
+	maxDocumentBytes = 64 * 1024 * 1024
 )
 
 // Runner orchestrates the four-pass pipeline (walker → structural →
@@ -339,6 +348,11 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 	return nil
 }
 
+// errDocumentOversize marks a binary document rejected by the file-size cap
+// (F3) before any extractor runs. Its bare string is the grep-able marker
+// 'document_oversize' surfaced in the end-of-run failure histogram.
+var errDocumentOversize = errors.New("document_oversize")
+
 // runExtractedDocument handles a binary document (.pdf/.docx/.odt) through the
 // same per-file pass lifecycle as text files, but the text comes from a
 // dedicated extractor instead of readFileContent (A4). Structural pass creates a
@@ -349,13 +363,33 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 // Extraction failures are returned (not swallowed): the caller's deferred
 // rollback discards the partial transaction and processOneFile records the
 // failure under the current pass with the error's verbatim message. The
-// chunker's sentinel errors stringify to exactly the visible markers the plan
+// chunker's sentinel errors stringify to exactly the bare markers the plan
 // requires — chunker.ErrDependencyMissing → "dependency:pdftotext",
-// chunker.ErrExtractionQuality → "extraction_quality" — so index-v3 status
-// surfaces them honestly (D8), never a crash, never silent.
+// chunker.ErrExtractionQuality → "extraction_quality", chunker.ErrExtractionEmpty
+// → "extraction_empty", chunker.ErrExtractionTimeout → "extraction_timeout",
+// chunker.ErrExtractionOversize → "extraction_oversize", chunker.ErrTooManyChunks
+// → "too_many_chunks", and errDocumentOversize → "document_oversize".
+//
+// Observability (F7): `index-v3 status` buckets failures by pass_name only
+// (e.g. chunker_failed=N), NOT by error_message — so these markers are NOT
+// visible there as distinct buckets. They surface via the END-OF-RUN run-summary
+// log (logSummary's top-3 error-prefix histogram), which groups
+// pipeline_state.error_message prefixes. That is the observable channel for
+// distinguishing dependency:pdftotext / extraction_quality / extraction_empty /
+// extraction_timeout / extraction_oversize / too_many_chunks / document_oversize.
+// Adding a proto field to surface them in status is deliberately out of scope.
 func (r *Runner) runExtractedDocument(ctx context.Context, tx *sql.Tx, f fileRow) error {
 	title := filepath.Base(f.Path)
 	ext := strings.ToLower(filepath.Ext(f.Path))
+
+	// Input file-size cap (F3a): routing reaches here BEFORE readFileContent, so
+	// the text path's maxReadBytes never guarded these files. Reject an oversize
+	// document before invoking any extractor (poppler/archive/zip), attributing
+	// it to the chunker pass with the bare 'document_oversize' marker.
+	if f.Size > maxDocumentBytes {
+		r.currentPass = PassChunker
+		return fmt.Errorf("%w (%d bytes > cap %d)", errDocumentOversize, f.Size, maxDocumentBytes)
+	}
 
 	// Extract first (before any DB writes) so a failure leaves no partial node.
 	var (
@@ -367,7 +401,7 @@ func (r *Runner) runExtractedDocument(ctx context.Context, tx *sql.Tx, f fileRow
 	switch ext {
 	case ".pdf":
 		kind = "pdf_text"
-		chunks, stats, err = chunker.ChunkPDF(f.Path, title, r.Cfg, r.Counter, r.PDFCfg)
+		chunks, stats, err = chunker.ChunkPDF(ctx, f.Path, title, r.Cfg, r.Counter, r.PDFCfg)
 	case ".docx", ".odt":
 		kind = "office_text"
 		chunks, stats, err = chunker.ChunkOffice(f.Path, title, ext, r.Cfg, r.Counter)
@@ -381,17 +415,36 @@ func (r *Runner) runExtractedDocument(ctx context.Context, tx *sql.Tx, f fileRow
 		// Attribute the failure to the chunker pass (extraction is pass 2).
 		r.currentPass = PassChunker
 		// Normalize the known sentinels to their bare marker so
-		// pipeline_state.error_message is exactly 'dependency:pdftotext' /
-		// 'extraction_quality' (the grep-able markers index-v3 status buckets
-		// on), regardless of any wrapping detail the extractor added.
+		// pipeline_state.error_message is exactly the grep-able marker
+		// (the prefix logSummary buckets on), regardless of any wrapping
+		// detail the extractor added. A context cancellation is NOT a per-file
+		// failure — propagate it so processOneFile treats it as shutdown.
 		switch {
+		case errors.Is(err, context.Canceled):
+			return err
 		case errors.Is(err, chunker.ErrDependencyMissing):
 			return chunker.ErrDependencyMissing
 		case errors.Is(err, chunker.ErrExtractionQuality):
 			return chunker.ErrExtractionQuality
+		case errors.Is(err, chunker.ErrExtractionEmpty):
+			return chunker.ErrExtractionEmpty
+		case errors.Is(err, chunker.ErrExtractionTimeout):
+			return chunker.ErrExtractionTimeout
+		case errors.Is(err, chunker.ErrExtractionOversize):
+			return chunker.ErrExtractionOversize
+		case errors.Is(err, chunker.ErrTooManyChunks):
+			return chunker.ErrTooManyChunks
 		default:
 			return err
 		}
+	}
+	// Defense in depth (F1): the chunker already returns ErrExtractionEmpty on a
+	// zero-chunk extraction, but guard here too so a future extractor that forgets
+	// the sentinel still cannot mark a file done-with-zero-chunks (silently
+	// unsearchable, dropped from PendingFiles forever).
+	if len(chunks) == 0 {
+		r.currentPass = PassChunker
+		return chunker.ErrExtractionEmpty
 	}
 
 	now := time.Now().Unix()

@@ -57,19 +57,41 @@ func Migrate(db *sql.DB, snapshotPath string) error {
 		}
 		if _, err := tx.Exec(string(raw)); err != nil {
 			_ = tx.Rollback()
+			resetLegacyAlterTable(db)
 			return fmt.Errorf("apply %s: %w", m.filename, err)
 		}
 		if _, err := tx.Exec(
 			`UPDATE config SET value=? WHERE key='schema_version'`, strconv.Itoa(m.version),
 		); err != nil {
 			_ = tx.Rollback()
+			resetLegacyAlterTable(db)
 			return fmt.Errorf("update schema_version: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
+			resetLegacyAlterTable(db)
 			return fmt.Errorf("commit %s: %w", m.filename, err)
 		}
+		// F9: PRAGMA legacy_alter_table is connection-scoped and survives ROLLBACK
+		// (and, like all connection PRAGMAs, persists past COMMIT). Migration 0004
+		// turns it ON for its rename and turns it OFF again in-SQL on the success
+		// path (defense in depth). But if a migration failed mid-flight — or a
+		// future migration toggles it and forgets to reset — the protective modern
+		// rename semantics would leak to every later statement on this pooled
+		// connection (store.Open pins the pool to ONE connection). Reset it to OFF
+		// after EVERY migration regardless of outcome so the state never leaks.
+		resetLegacyAlterTable(db)
 	}
 	return nil
+}
+
+// resetLegacyAlterTable forces PRAGMA legacy_alter_table=OFF on the connection
+// (F9). It is connection-scoped and survives both ROLLBACK and COMMIT, so the
+// migration runner resets it on every exit path; the pool is pinned to one
+// connection (store.Open) so this reliably clears the one connection migrations
+// run on. Best-effort: a failure here is logged-by-return only at callers that
+// already have an error, so it never masks the original migration error.
+func resetLegacyAlterTable(db *sql.DB) {
+	_, _ = db.Exec(`PRAGMA legacy_alter_table=OFF`)
 }
 
 // readSchemaVersion returns 0 if the config table does not exist or has no

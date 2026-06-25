@@ -18,8 +18,19 @@ const officeExtractorVersion = "office-zipxml-v1"
 
 // maxOfficeXML caps the document XML we parse from the ZIP, mirroring the
 // runner's per-file read cap intent — a malicious or corrupt container should
-// not be able to make us allocate unbounded memory.
-const maxOfficeXML = 64 * 1024 * 1024 // 64 MB of document XML
+// not be able to make us allocate unbounded memory. Tightened from 64 MB to
+// 16 MB (F4): a 16 MB document.xml is already an enormous text document; the
+// previous 64 MB allowed a single inner part to be twice the 32 MB source read
+// cap, undermining the cap's intent.
+const maxOfficeXML = 16 * 1024 * 1024 // 16 MB of document XML
+
+// maxZipEntries bounds the number of entries in an office container (F4). A
+// malicious ZIP can carry a central directory with millions of entry headers (a
+// "zip flood") that forces archive/zip to allocate one *zip.File per entry —
+// memory DoS — before we ever read a byte of content. Real docx/odt files have
+// tens of entries (parts, rels, media); 4096 is far above any legitimate
+// document yet bounds the attack.
+const maxZipEntries = 4096
 
 // ChunkOffice extracts text from a docx or odt ZIP container and produces
 // paragraph-anchored prose chunks with chunk_kind='office_text' (DISTINCT from
@@ -57,6 +68,12 @@ func extractOfficeParagraphs(path, ext string) ([]string, error) {
 		return nil, fmt.Errorf("open office container %s: %w", path, err)
 	}
 	defer func() { _ = zr.Close() }()
+
+	// Entry-count cap (F4): reject a zip-flood container before iterating its
+	// (potentially millions of) entry headers.
+	if len(zr.File) > maxZipEntries {
+		return nil, fmt.Errorf("office container %s has %d entries (> cap %d)", path, len(zr.File), maxZipEntries)
+	}
 
 	var docPart string
 	switch ext {
@@ -101,7 +118,7 @@ func extractOfficeParagraphs(path, ext string) ([]string, error) {
 // (matches on Local names) so it tolerates the various w:/wpc: prefixes real
 // writers emit. <w:tab>/<w:br> are treated as whitespace within a paragraph.
 func parseDocxParagraphs(raw []byte) ([]string, error) {
-	dec := xml.NewDecoder(strings.NewReader(string(raw)))
+	dec := xml.NewDecoder(bytes.NewReader(raw))
 	var paras []string
 	var cur strings.Builder
 	inText := false
@@ -148,7 +165,7 @@ func parseDocxParagraphs(raw []byte) ([]string, error) {
 // CharData transparently because we accumulate all CharData while inside a
 // paragraph element.
 func parseOdtParagraphs(raw []byte) ([]string, error) {
-	dec := xml.NewDecoder(strings.NewReader(string(raw)))
+	dec := xml.NewDecoder(bytes.NewReader(raw))
 	var paras []string
 	var cur strings.Builder
 	depth := 0 // >0 while inside a text:p / text:h

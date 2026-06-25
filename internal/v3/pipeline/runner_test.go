@@ -569,6 +569,22 @@ func TestRunner_BinaryDocumentsExtracted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read pdf fixture: %v", err)
 	}
+	// F5 (R2 BLOCKING): the PDF fixture MUST carry a NUL within its first 8 KB the
+	// way real PDFs do — otherwise walker.IsBinaryContent(sample)==false and the
+	// "stays content_class=document" assertion below passes WHETHER OR NOT the
+	// .pdf exemption exists (a vacuous test — the Q2-retro masking failure). Fail
+	// loudly here if a future regen drops the NUL, so the PDF half of the
+	// exemption is genuinely exercised.
+	sniff := pdfBytes
+	if len(sniff) > 8192 {
+		sniff = sniff[:8192]
+	}
+	if !bytes.Contains(sniff, []byte{0x00}) {
+		t.Fatalf("PDF fixture has no NUL in its first 8192 bytes — the binary-exemption assertion would be vacuous (F5/R2). Regenerate multi_page.pdf with a NUL-bearing binary comment.")
+	}
+	if !walker.IsBinaryContent(sniff) {
+		t.Fatalf("walker.IsBinaryContent(pdf sample)==false — the .pdf exemption is not being exercised (F5/R2)")
+	}
 	writeFile(t, dir, "report.pdf", pdfBytes)
 
 	// Real docx + odt fixtures (NUL-bearing ZIP containers, R2).
@@ -676,6 +692,63 @@ func TestRunner_PDFMissingDependency(t *testing.T) {
 	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, pdfID); got != 0 {
 		t.Errorf("failed PDF produced %d chunks, want 0 (transaction rolled back)", got)
 	}
+}
+
+// TestRunner_EmptyExtractionFailsObservably (F1): a binary-document extraction
+// that yields ZERO chunks must land status=FAILED with error_message=
+// "extraction_empty" — NOT done-with-zero-chunks (which would count the file
+// indexed, drop it from PendingFiles forever, and leave it silently
+// unsearchable). Two paths: a valid PDF whose pdftotext output is only a
+// form-feed (empty_text.pdf), and a docx with no paragraphs (text-empty office).
+func TestRunner_EmptyExtractionFailsObservably(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+
+	// Empty-text PDF (pdftotext output = "\f"); needs pdftotext.
+	havePdftotext := false
+	if _, err := exec.LookPath("pdftotext"); err == nil {
+		havePdftotext = true
+		pdfBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "v3", "pdf", "empty_text.pdf"))
+		if err != nil {
+			t.Fatalf("read empty pdf fixture: %v", err)
+		}
+		writeFile(t, dir, "blank.pdf", pdfBytes)
+	}
+
+	// Text-empty docx: no paragraphs → zero extracted chunks. No pdftotext needed.
+	emptyDocx, err := chunker.BuildDOCX(nil)
+	if err != nil {
+		t.Fatalf("BuildDOCX(nil): %v", err)
+	}
+	writeFile(t, dir, "empty.docx", emptyDocx)
+
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	check := func(name string) {
+		id := fileIDByPathSuffix(t, db, name)
+		var status, msg string
+		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name='chunker'`, id).Scan(&status, &msg); err != nil {
+			t.Fatalf("%s chunker row: %v", name, err)
+		}
+		if status != "failed" || msg != "extraction_empty" {
+			t.Errorf("%s chunker = (%q, %q), want (failed, extraction_empty)", name, status, msg)
+		}
+		// The transaction rolled back: no node/chunk persisted, and the file is NOT
+		// marked done (so it stays a pending retry, not silently indexed-empty).
+		if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=?`, id); got != 0 {
+			t.Errorf("%s left %d nodes — tx should have rolled back", name, got)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, id); got != 0 {
+			t.Errorf("%s embeddings marked done despite zero chunks (silent index-empty)", name)
+		}
+	}
+	if havePdftotext {
+		check("blank.pdf")
+	}
+	check("empty.docx")
 }
 
 // TestRunner_NonIndexableSkipped (Q2 Gap B): the image/media/data/unknown skip

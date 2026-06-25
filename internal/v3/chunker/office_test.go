@@ -3,6 +3,7 @@
 package chunker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,5 +148,35 @@ func TestChunkOffice_MalformedContainer(t *testing.T) {
 	}
 	if _, _, err := ChunkOffice(path, "broken.docx", ".docx", DefaultConfig(), wordCounter{}); err == nil {
 		t.Error("expected an error for a non-ZIP .docx, got nil")
+	}
+}
+
+// TestChunkOffice_ZipEntryCap (F4): a container with more than maxZipEntries
+// entries (a zip-flood DoS) is rejected before the entry loop allocates one
+// *zip.File per header. The synthetic zip carries > maxZipEntries tiny entries;
+// extraction must return an error mentioning the entry count, not OOM.
+func TestChunkOffice_ZipEntryCap(t *testing.T) {
+	entries := make([]zipEntry, 0, maxZipEntries+2)
+	// Include the real document part so the ONLY reason to error is the entry cap.
+	entries = append(entries, zipEntry{"word/document.xml",
+		`<?xml version="1.0"?><w:document xmlns:w="x"><w:body><w:p><w:r><w:t>hi</w:t></w:r></w:p></w:body></w:document>`,
+		0})
+	for i := 0; i < maxZipEntries+1; i++ {
+		entries = append(entries, zipEntry{fmt.Sprintf("pad/%d.txt", i), "x", 0})
+	}
+	raw, err := buildZip(entries)
+	if err != nil {
+		t.Fatalf("buildZip: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "flood.docx")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = extractOfficeParagraphs(path, ".docx")
+	if err == nil {
+		t.Fatal("expected an error for a zip-flood container, got nil")
+	}
+	if !strings.Contains(err.Error(), "entries") {
+		t.Errorf("error = %v, want it to mention the entry-count cap", err)
 	}
 }
