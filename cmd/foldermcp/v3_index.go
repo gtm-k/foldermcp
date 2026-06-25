@@ -9,10 +9,18 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/gtm-k/foldermcp/internal/v3/pipeline"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
+)
+
+// watch-mode flags shared by index-v3 (and read by all-v3 via the same vars).
+var (
+	v3Watch         bool
+	v3WatchInterval time.Duration
 )
 
 var v3IndexCmd = &cobra.Command{
@@ -63,6 +71,21 @@ func runV3Index(ctx context.Context, workspacePath string) error {
 		return fmt.Errorf("index: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "foldermcp index: indexing complete\n")
+
+	// --watch (Phase 6 / D9, D14): after the initial full index, stay resident
+	// and keep the index fresh as files change. The watch loop drives the same
+	// Runner over changed files (events are candidates, not commands — the
+	// sha256 trigger short-circuits mtime-only churn). Blocks until ctx is
+	// cancelled (SIGINT/SIGTERM).
+	if v3Watch {
+		cfg := pipeline.WatchConfig{Interval: v3WatchInterval}
+		loop := pipeline.NewWatchLoop(db, runner, workspacePath, cfg, nil, nil)
+		fmt.Fprintf(os.Stderr, "foldermcp index: watching %s (interval %s)\n", workspacePath, cfg.Interval)
+		if err := loop.Run(ctx); err != nil && ctx.Err() == nil {
+			return fmt.Errorf("watch: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "foldermcp index: watch stopped\n")
+	}
 	return nil
 }
 
@@ -73,5 +96,9 @@ func detectRAMMB() int {
 }
 
 func init() {
+	v3IndexCmd.Flags().BoolVar(&v3Watch, "watch", false,
+		"after the initial index, stay resident and re-index files as they change")
+	v3IndexCmd.Flags().DurationVar(&v3WatchInterval, "watch-interval", 2*time.Second,
+		"poll cadence for the watch-mode file scanner (e.g. 2s, 30s)")
 	rootCmd.AddCommand(v3IndexCmd)
 }

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	ort "github.com/yalue/onnxruntime_go"
@@ -36,6 +37,14 @@ var v3AllCmd = &cobra.Command{
 		return runV3All(ctx, args[0])
 	},
 }
+
+// v3AllWatch / v3AllWatchInterval mirror the index-v3 --watch flags for the
+// combined daemon. (Separate vars so the two commands' flag sets stay
+// independent under cobra.)
+var (
+	v3AllWatch         bool
+	v3AllWatchInterval time.Duration
+)
 
 func runV3All(ctx context.Context, workspacePath string) error {
 	storeDir := os.Getenv("FOLDERMCP_STORE")
@@ -121,6 +130,21 @@ func runV3All(ctx context.Context, workspacePath string) error {
 			return
 		}
 		fmt.Fprintf(os.Stderr, "foldermcp all: indexing complete\n")
+
+		// --watch (Phase 6): keep the index fresh while the server serves.
+		// Backpressure is built into the loop (one Runner pass at a time), so
+		// the indexer goroutine never spawns unbounded work. The query-side
+		// embedder is a separate instance, so re-index writes never contend
+		// with query reads for the embed lock.
+		if v3AllWatch {
+			cfg := pipeline.WatchConfig{Interval: v3AllWatchInterval}
+			loop := pipeline.NewWatchLoop(db, runner, workspacePath, cfg, nil, nil)
+			fmt.Fprintf(os.Stderr, "foldermcp all: watching %s (interval %s)\n", workspacePath, cfg.Interval)
+			if err := loop.Run(ctx); err != nil && ctx.Err() == nil {
+				fmt.Fprintf(os.Stderr, "foldermcp all: watch error: %v\n", err)
+			}
+			fmt.Fprintf(os.Stderr, "foldermcp all: watch stopped\n")
+		}
 	}()
 
 	fmt.Fprintf(os.Stderr, "foldermcp all: serving on %s\n", sockPath)
@@ -246,5 +270,9 @@ func newV3Runner(db *sql.DB, modelPath, tokenizerPath string) (*pipeline.Runner,
 }
 
 func init() {
+	v3AllCmd.Flags().BoolVar(&v3AllWatch, "watch", false,
+		"after the initial index, keep the index fresh as files change")
+	v3AllCmd.Flags().DurationVar(&v3AllWatchInterval, "watch-interval", 2*time.Second,
+		"poll cadence for the watch-mode file scanner (e.g. 2s, 30s)")
 	rootCmd.AddCommand(v3AllCmd)
 }

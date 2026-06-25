@@ -12,10 +12,25 @@ import (
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 )
 
+// WatchMetricsProvider exposes the watch loop's process-level counters to the
+// Status handler without admin importing the pipeline package (avoids a
+// dependency-direction coupling: pipeline.WatchMetrics satisfies this). nil
+// when the daemon is not running in --watch mode.
+type WatchMetricsProvider interface {
+	EventsReconciledTotal() int64
+	// OverflowRecoveryAgeUnix is the unix mtime of the oldest change recovered
+	// only by reconciliation, or 0 if none. Status converts it to an age.
+	OverflowRecoveryAgeUnix() int64
+}
+
 // Handler implements IndexAdmin.Status and IndexAdmin.Health.
 type Handler struct {
 	DB        *sql.DB
 	StartTime time.Time
+	// Watch is set only when the daemon runs in --watch mode; nil otherwise.
+	// When set, Status surfaces events_reconciled_total and
+	// watch_overflow_recovery_age_seconds.
+	Watch WatchMetricsProvider
 }
 
 func (h *Handler) Status(ctx context.Context, _ *pb.StatusRequest) (*pb.StatusResponse, error) {
@@ -94,6 +109,62 @@ SELECT pass_name || '_skipped', COUNT(*) FROM pipeline_state WHERE status='skipp
 		if err := srows.Err(); err != nil {
 			slog.Warn("status: skip-count iteration failed — '<pass>_skipped' counts may be incomplete", "error", err)
 		}
+	}
+
+	// Watch-mode freshness observability (Phase 6 / D14): surface the pending
+	// backlog and its oldest age via synthetic passCounts keys (no proto change,
+	// mirroring the '<pass>_failed'/'<pass>_skipped' convention). 'pending_files'
+	// is the count of non-deleted files with no embeddings=done row;
+	// 'oldest_pending_seconds' is now − the oldest such file's mtime (0 when the
+	// backlog is empty). These are meaningful in batch mode too, so they are
+	// emitted unconditionally.
+	var pendingFiles int64
+	if err := h.DB.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM files f
+WHERE f.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM pipeline_state ps
+    WHERE ps.file_id=f.file_id AND ps.pass_name='embeddings' AND ps.status='done')`).Scan(&pendingFiles); err != nil {
+		slog.Warn("status: pending_files query failed — count omitted", "error", err)
+	} else {
+		passCounts["pending_files"] = pendingFiles
+		if pendingFiles > 0 {
+			var oldestMtime int64
+			if err := h.DB.QueryRowContext(ctx, `
+SELECT COALESCE(MIN(f.mtime), 0) FROM files f
+WHERE f.deleted_at IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM pipeline_state ps
+    WHERE ps.file_id=f.file_id AND ps.pass_name='embeddings' AND ps.status='done')`).Scan(&oldestMtime); err != nil {
+				slog.Warn("status: oldest_pending query failed — age omitted", "error", err)
+			} else if oldestMtime > 0 {
+				age := time.Now().Unix() - oldestMtime
+				if age < 0 {
+					age = 0
+				}
+				passCounts["oldest_pending_seconds"] = age
+			}
+		} else {
+			passCounts["oldest_pending_seconds"] = 0
+		}
+	}
+
+	// Watch-loop process counters (D14 round-2 finding #3): only present when the
+	// daemon runs in --watch mode. events_reconciled_total counts files first
+	// indexed by a reconciliation sweep (the channel-drop safety net firing);
+	// watch_overflow_recovery_age_seconds is the staleness of the oldest such
+	// recovery, making a dropped-event SLO violation observable rather than silent.
+	if h.Watch != nil {
+		passCounts["events_reconciled_total"] = h.Watch.EventsReconciledTotal()
+		recAt := h.Watch.OverflowRecoveryAgeUnix()
+		var recAge int64
+		if recAt > 0 {
+			recAge = time.Now().Unix() - recAt
+			if recAge < 0 {
+				recAge = 0
+			}
+		}
+		passCounts["watch_overflow_recovery_age_seconds"] = recAge
 	}
 
 	var uuid string
