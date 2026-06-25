@@ -33,11 +33,19 @@ jobs:
         if: runner.os != 'Windows'
         run: go test -race -coverprofile=coverage.out $(go list ./... | grep -v '/internal/v3')
 
+      # Windows: the runner has no sqlite3.h, so cgo must be OFF here. With cgo
+      # on (the default, since the runner has gcc and -race forces it), building
+      # cmd/foldermcp — which imports internal/v3 — compiles v3's cgo sqlite-vec
+      # path and fails on the missing header. CGO_ENABLED=0 selects v3's nocgo
+      # stubs; it also precludes -race (which requires cgo). v3's cgo coverage
+      # lives in v3-ci.yml (linux-cgo); its nocgo-windows job covers v3 on Windows.
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
+        env:
+          CGO_ENABLED: '0'
         run: |
           $pkgs = go list ./... | Where-Object { $_ -notmatch 'internal/v3' }
-          go test -race $pkgs
+          go test $pkgs
 
       - name: Build binary
         if: runner.os != 'Windows'
@@ -45,6 +53,8 @@ jobs:
 
       - name: Build binary (Windows)
         if: runner.os == 'Windows'
+        env:
+          CGO_ENABLED: '0' # no sqlite3.h on the runner; build the nocgo binary (see test step)
         run: go build -o foldermcp.exe ./cmd/foldermcp
 
       - name: Verify binary
