@@ -27,15 +27,27 @@ import (
 //
 // NOTE: the scale is encoded into the fingerprint via QuantizationModeString,
 // so changing Int8Scale self-invalidates existing indexes (they get rebuilt).
-const Int8Scale float32 = 256.0
+//
+// Int8Scale is an INTEGER type on purpose (only integer scales are supported;
+// the calibration sweep ranges over integers). This guarantees the fingerprint
+// label below is exact — a fractional scale cannot silently truncate to the
+// same "s256" label and compare incomparable fixed-scale codes (Codex Q1
+// finding 3). Changing the scale requires editing this typed constant.
+const Int8Scale int = 256
 
 // QuantizationModeString is the embedding_fingerprint label for the current
 // int8 scheme. It embeds Int8Scale so that any change to the scale produces a
 // different label, which fails the startup fingerprint check and forces a
 // rebuild — preventing new query codes from being compared against stored
 // codes quantized at a different scale.
+//
+// The migration-0003 CHECK (GLOB 'int8_fixed_s[0-9]*') is a loose backstop:
+// this function is the sole producer of the label, and with Int8Scale typed as
+// int it always emits exactly "int8_fixed_s<digits>". The CHECK's looseness
+// (it would also accept a hand-written malformed mode) is therefore not
+// reachable through any code path (Codex Q1 finding 2 — accepted, not a bug).
 func QuantizationModeString() string {
-	return fmt.Sprintf("int8_fixed_s%d", int(Int8Scale))
+	return fmt.Sprintf("int8_fixed_s%d", Int8Scale)
 }
 
 // QuantizeInt8 maps a float32 vector to int8 using the fixed global Int8Scale.
@@ -43,7 +55,7 @@ func QuantizationModeString() string {
 // component always maps to the same code regardless of the rest of the vector,
 // preserving cross-vector comparability.
 func QuantizeInt8(v []float32) []int8 {
-	return quantizeInt8(v, Int8Scale)
+	return quantizeInt8(v, float32(Int8Scale))
 }
 
 // quantizeInt8 is the scale-parameterized core, separated so the math is

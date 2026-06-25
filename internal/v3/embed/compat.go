@@ -4,6 +4,8 @@ package embed
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 
 	"github.com/gtm-k/foldermcp/internal/v3/store"
 )
@@ -27,11 +29,20 @@ import (
 // indexer and query server can run as separate processes against one DB.
 func SemanticIndexCompatible(db *sql.DB) (ok bool, storedMode string) {
 	fp, err := store.ReadFingerprint(db)
-	if err != nil {
-		// No row (fresh index) or a transient read error: do not block
-		// semantic search. A fresh index is compatible by construction once
-		// the indexer writes the fingerprint.
+	if errors.Is(err, sql.ErrNoRows) {
+		// No fingerprint row: a genuinely fresh index, compatible by
+		// construction once the indexer writes the fingerprint. This is the
+		// ONLY error allowed to fail OPEN.
 		return true, ""
+	}
+	if err != nil {
+		// Any other read error (e.g. a missing/corrupt embedding_fingerprint
+		// table) is a schema fault, not a fresh index. We cannot prove the
+		// stored codes are comparable, so fail CLOSED — disable semantic search
+		// rather than run KNN on possibly-incomparable vectors and return
+		// silent-garbage rankings (mirrors store.CheckFingerprint's write-side
+		// guard). The reason is surfaced to the caller for an observable warning.
+		return false, fmt.Sprintf("unreadable fingerprint: %v", err)
 	}
 	if fp.QuantizationMode != QuantizationModeString() {
 		return false, fp.QuantizationMode

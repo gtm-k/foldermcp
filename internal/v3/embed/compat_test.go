@@ -46,3 +46,30 @@ func TestSemanticIndexCompatible(t *testing.T) {
 		t.Errorf("legacy int8 index: ok=%v stored=%q, want ok=false stored=int8", ok, stored)
 	}
 }
+
+// TestSemanticIndexCompatible_FailsClosedOnReadError (Codex gate, Q1 finding 1):
+// a fingerprint READ error that is NOT sql.ErrNoRows (e.g. a missing/corrupt
+// embedding_fingerprint table — a schema fault, not a fresh index) must fail
+// CLOSED: we cannot prove the stored codes are comparable, so semantic search
+// must be disabled rather than run KNN on possibly-incomparable vectors and
+// return silent-garbage rankings. Only sql.ErrNoRows (genuinely fresh index)
+// may fail open.
+func TestSemanticIndexCompatible_FailsClosedOnReadError(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "c.db"), Tier: store.TierMid})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(db, ""); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	// Simulate a schema fault: the fingerprint table is unreadable. ReadFingerprint
+	// now returns a "no such table" error, which is NOT sql.ErrNoRows.
+	if _, err := db.Exec(`DROP TABLE embedding_fingerprint`); err != nil {
+		t.Fatalf("drop fingerprint table: %v", err)
+	}
+	if ok, stored := SemanticIndexCompatible(db); ok {
+		t.Errorf("unreadable fingerprint: ok=true stored=%q, want ok=false (fail closed)", stored)
+	}
+}

@@ -54,7 +54,7 @@ func TestFixedScaleClampsSymmetric(t *testing.T) {
 // fails loudly in CI — the codes on disk would silently change otherwise. Note
 // 0.5·256 = 128 saturates to 127, and -0.5·256 = -128 saturates to -127.
 func TestQuantizeFormulaAtScale256(t *testing.T) {
-	if Int8Scale != 256.0 {
+	if Int8Scale != 256 {
 		t.Fatalf("Int8Scale = %v; this golden test is pinned to 256 — update the "+
 			"expected codes below and bump QuantizationModeString consumers", Int8Scale)
 	}
