@@ -35,8 +35,14 @@ func NewWriter(db *sql.DB) *Writer {
 			// Bound to the live chunker config (D28b D3, pre-mortem
 			// Story 3) — a chunk-size change cannot silently leave a
 			// stale policy label on persisted embeddings.
-			ChunkingPolicy:   chunker.DefaultConfig().PolicyString(),
-			QuantizationMode: "int8",
+			ChunkingPolicy: chunker.DefaultConfig().PolicyString(),
+			// Fixed-scale int8 (QuantizeInt8 uses a single global Int8Scale,
+			// not per-vector 127/maxAbs). The mode label embeds the scale
+			// (e.g. "int8_fixed_s256") so both an existing per-vector index
+			// ("int8") AND any future scale change fail the startup fingerprint
+			// check and trigger a rebuild. The widened CHECK that admits these
+			// values ships in migration 0003.
+			QuantizationMode: QuantizationModeString(),
 		},
 	}
 }

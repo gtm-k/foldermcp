@@ -49,6 +49,75 @@ func TestWriterEnforcesFingerprint(t *testing.T) {
 	}
 }
 
+// The fixed-scale quantization scheme is a different int8 representation than
+// the old per-vector scheme, so the writer must stamp QuantizationMode as
+// "int8_fixed". This is what makes an existing per-vector index fail the
+// startup fingerprint check and get rebuilt. Verified through the public
+// round-trip (no test-only accessor on Writer).
+func TestEnsureFingerprintUsesInt8Fixed(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "fp.db"), Tier: store.TierMid})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(db, ""); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	w := NewWriter(db)
+	if err := w.EnsureFingerprint(); err != nil {
+		t.Fatalf("EnsureFingerprint: %v", err)
+	}
+	fp, err := store.ReadFingerprint(db)
+	if err != nil {
+		t.Fatalf("ReadFingerprint: %v", err)
+	}
+	if fp.QuantizationMode != QuantizationModeString() {
+		t.Errorf("QuantizationMode = %q, want %q — the fixed-scale scheme must "+
+			"stamp the scale-tagged mode so per-vector indexes rebuild",
+			fp.QuantizationMode, QuantizationModeString())
+	}
+	if fp.QuantizationMode == "int8" {
+		t.Error("QuantizationMode must not be the legacy per-vector \"int8\"")
+	}
+}
+
+// Directly pins this change's reason-for-being: a store stamped with the legacy
+// per-vector "int8" mode must mismatch when this binary wants the fixed-scale
+// scale-tagged mode, surfacing ErrFingerprintMismatch (which the runner treats
+// as fatal). TestWriterEnforcesFingerprint only exercises a ModelName mismatch,
+// so it would pass even if the int8→int8_fixed delta were ignored.
+func TestExistingInt8IndexTriggersRebuild(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "old.db"), Tier: store.TierMid})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(db, ""); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Seed a fingerprint identical to this binary's EXCEPT the legacy mode.
+	if err := NewWriter(db).EnsureFingerprint(); err != nil {
+		t.Fatalf("seed ensure: %v", err)
+	}
+	fp, err := store.ReadFingerprint(db)
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+	fp.QuantizationMode = "int8" // pretend this index was built per-vector
+	if err := store.WriteFingerprint(db, fp); err != nil {
+		t.Fatalf("write legacy fingerprint: %v", err)
+	}
+
+	// A fresh writer (wanting the scale-tagged mode) must refuse.
+	if err := NewWriter(db).EnsureFingerprint(); !errors.Is(err, store.ErrFingerprintMismatch) {
+		t.Errorf("EnsureFingerprint on a legacy int8 index = %v, want ErrFingerprintMismatch", err)
+	}
+}
+
 func TestWriterWriteBatch(t *testing.T) {
 	tmp := t.TempDir()
 	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "e.db"), Tier: store.TierMid})

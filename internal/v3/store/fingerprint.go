@@ -13,10 +13,16 @@ type Fingerprint struct {
 	ModelVersion     string
 	Dimension        int
 	ChunkingPolicy   string
-	QuantizationMode string // "int8" or "float32"
+	QuantizationMode string // "int8", "int8_fixed_s<scale>", or "float32"
 }
 
-var ErrFingerprintMismatch = errors.New("embedding_fingerprint mismatch — run `foldermcp index rebuild-vectors` or pass --force-new-schema")
+// ErrFingerprintMismatch reports that the stored index was built with a
+// different embedding model, chunking policy, or quantization scheme than this
+// binary produces, so its persisted vectors are not comparable to freshly
+// embedded queries. The recovery is to rebuild: there is no in-place upgrade,
+// so the message names the action that actually exists (delete + re-index)
+// rather than a command that does not.
+var ErrFingerprintMismatch = errors.New("embedding_fingerprint mismatch: this index was built with a different embedding model, chunking policy, or quantization scheme than this binary produces — delete the store's index.db and re-run `index-v3` to rebuild it")
 
 // WriteFingerprint inserts or replaces the singleton row.
 func WriteFingerprint(db *sql.DB, fp Fingerprint) error {

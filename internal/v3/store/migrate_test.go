@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,9 +21,9 @@ func TestMigrateFromEmptyDB(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	// Fresh DB: readSchemaVersion returns 0 (no config table yet),
-	// pending includes 0001_init.sql + 0002_invalidate_on_sha256.sql,
-	// apply both, schema_version → 2.
+	// Fresh DB: readSchemaVersion returns 0 (no config table yet), pending
+	// includes 0001_init + 0002_invalidate_on_sha256 + 0003_widen_quantmode_check,
+	// apply all three, schema_version → 3.
 	if err := Migrate(db, filepath.Join(tmp, "backup/pre.db")); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -31,8 +32,8 @@ func TestMigrateFromEmptyDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readSchemaVersion: %v", err)
 	}
-	if v != 2 {
-		t.Errorf("schema_version = %d, want 2", v)
+	if v != 3 {
+		t.Errorf("schema_version = %d, want 3", v)
 	}
 
 	// Second call must be a no-op.
@@ -40,8 +41,117 @@ func TestMigrateFromEmptyDB(t *testing.T) {
 		t.Fatalf("re-migrate: %v", err)
 	}
 	v2, _ := readSchemaVersion(db)
-	if v2 != 2 {
+	if v2 != 3 {
 		t.Errorf("re-migrate moved schema_version to %d", v2)
+	}
+}
+
+// Migration 0003 widens the embedding_fingerprint.quantization_mode CHECK to
+// admit the new "int8_fixed" scheme while keeping the legacy values valid and
+// still rejecting unknown modes. SQLite cannot ALTER a CHECK in place, so 0003
+// rebuilds the (singleton, FK-free) table — this test guards that rebuild.
+func TestMigration0003AllowsInt8FixedQuantMode(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := Open(Options{Path: filepath.Join(tmp, "q.db"), Tier: TierMid})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := Migrate(db, ""); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	base := Fingerprint{ModelName: "m", ModelVersion: "v", Dimension: 384, ChunkingPolicy: "p"}
+
+	// Scale-tagged fixed modes (any int8_fixed_s<digits>) must be accepted.
+	for _, mode := range []string{"int8_fixed_s256", "int8_fixed_s512", "int8", "float32"} {
+		f := base
+		f.QuantizationMode = mode
+		if err := WriteFingerprint(db, f); err != nil {
+			t.Errorf("valid mode %q rejected: %v", mode, err)
+		}
+		if got, _ := ReadFingerprint(db); got.QuantizationMode != mode {
+			t.Errorf("QuantizationMode = %q, want %q", got.QuantizationMode, mode)
+		}
+	}
+
+	// Unknown modes — including a scale-LESS "int8_fixed" — are rejected by the
+	// GLOB, so the scale can never silently drop out of the label.
+	for _, bad := range []string{"garbage", "int8_fixed", "int8_fixed_s", "int8_fixed_sx"} {
+		f := base
+		f.QuantizationMode = bad
+		if err := WriteFingerprint(db, f); err == nil {
+			t.Errorf("expected CHECK to reject quantization_mode %q", bad)
+		}
+	}
+}
+
+// Migration 0003 rebuilds embedding_fingerprint; its only non-trivial job is
+// preserving the existing singleton row across the rebuild. Every other test
+// migrates a FRESH DB (empty fingerprint), so the INSERT...SELECT copy path is
+// never exercised with data — a column-list bug would silently lose a real
+// user's fingerprint and pass all of them. This drives the actual upgrade path:
+// a populated v2 row must survive to v3 byte-for-byte, or CheckFingerprint
+// would hit ErrNoRows, return nil, and serve a stale index without a rebuild.
+func TestMigration0003PreservesExistingFingerprintRow(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := Open(Options{Path: filepath.Join(tmp, "upgrade.db"), Tier: TierMid})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// Bring the DB to schema_version=2 WITHOUT 0003: apply 0001+0002 raw, then
+	// stamp version 2 so Migrate will apply only 0003.
+	mfs, _ := MigrationFiles()
+	for _, f := range []string{"0001_init.sql", "0002_invalidate_on_sha256.sql"} {
+		raw, rerr := fs.ReadFile(mfs, f)
+		if rerr != nil {
+			t.Fatalf("read %s: %v", f, rerr)
+		}
+		if _, eerr := db.Exec(string(raw)); eerr != nil {
+			t.Fatalf("apply %s: %v", f, eerr)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO config(key,value) VALUES('schema_version','2')
+		ON CONFLICT(key) DO UPDATE SET value='2'`); err != nil {
+		t.Fatalf("seed schema_version: %v", err)
+	}
+
+	// Seed a realistic populated fingerprint (the pre-upgrade per-vector index).
+	seed := Fingerprint{
+		ModelName: "all-MiniLM-L6-v2", ModelVersion: "2.2.0", Dimension: 384,
+		ChunkingPolicy: "recursive_80_200_260_v1", QuantizationMode: "int8",
+	}
+	if err := WriteFingerprint(db, seed); err != nil {
+		t.Fatalf("seed fingerprint: %v", err)
+	}
+	var beforeCreated int64
+	if err := db.QueryRow(`SELECT created_at FROM embedding_fingerprint WHERE id=1`).Scan(&beforeCreated); err != nil {
+		t.Fatalf("read created_at: %v", err)
+	}
+
+	// Upgrade: applies ONLY 0003 (current=2), exercising the row copy.
+	if err := Migrate(db, ""); err != nil {
+		t.Fatalf("Migrate to 3: %v", err)
+	}
+	if v, _ := readSchemaVersion(db); v != 3 {
+		t.Errorf("schema_version = %d, want 3", v)
+	}
+
+	got, err := ReadFingerprint(db)
+	if err != nil {
+		t.Fatalf("fingerprint LOST across 0003 rebuild: %v", err)
+	}
+	if got != seed {
+		t.Errorf("fingerprint changed across rebuild: got %+v, want %+v", got, seed)
+	}
+	var afterCreated int64
+	if err := db.QueryRow(`SELECT created_at FROM embedding_fingerprint WHERE id=1`).Scan(&afterCreated); err != nil {
+		t.Fatalf("read created_at after: %v", err)
+	}
+	if afterCreated != beforeCreated {
+		t.Errorf("created_at not preserved: %d → %d", beforeCreated, afterCreated)
 	}
 }
 
@@ -74,8 +184,8 @@ func TestSnapshotCreatesFile(t *testing.T) {
 	if err := snapDB.QueryRow(`SELECT value FROM config WHERE key='schema_version'`).Scan(&v); err != nil {
 		t.Fatalf("snapshot schema_version: %v", err)
 	}
-	if v != "2" {
-		t.Errorf("snapshot schema_version = %q, want 2", v)
+	if v != "3" {
+		t.Errorf("snapshot schema_version = %q, want 3", v)
 	}
 }
 

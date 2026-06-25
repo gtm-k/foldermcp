@@ -81,6 +81,22 @@ func runV3All(ctx context.Context, workspacePath string) error {
 	} else {
 		queryEmbedder = embed.NewEmbedder(modelPath, tokenizerPath)
 	}
+
+	// Read-side fingerprint gate (mirror of the indexer's EnsureFingerprint).
+	// On a fresh index there is no fingerprint yet (the background indexer
+	// writes it), so this is a no-op; on an EXISTING incompatible index (e.g.
+	// an old per-vector "int8" store the indexer goroutine will refuse to
+	// re-embed) it disables semantic search so the server degrades to lexical
+	// with an observable reason instead of serving garbage rankings.
+	if queryEmbedder != nil {
+		if ok, stored := embed.SemanticIndexCompatible(db); !ok {
+			fmt.Fprintf(os.Stderr, "foldermcp all: WARNING semantic search disabled — "+
+				"index quantization %q is incompatible with this binary (%q); "+
+				"delete the store's index.db and re-run to rebuild\n",
+				stored, embed.QuantizationModeString())
+			queryEmbedder = nil
+		}
+	}
 	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db, Embedder: queryEmbedder})
 
 	// Kick off indexer pipeline in background (D28b.3): walker →

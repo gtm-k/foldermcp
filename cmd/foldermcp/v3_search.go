@@ -75,7 +75,23 @@ func runV3Search(ctx context.Context, out io.Writer, query string) error {
 		defer func() { _ = emb.Close() }() // free native ONNX session/tensors
 	}
 
-	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db, Embedder: emb})
+	// Read-side fingerprint gate: don't run fixed-scale query codes against an
+	// index quantized with a different scheme (e.g. an old per-vector "int8"
+	// store) — that silently returns garbage rankings. Degrade to lexical and
+	// say why. `emb` (and its deferred Close above) stays the resource owner;
+	// only the server's view is cleared, so cleanup still runs correctly.
+	searchEmbedder := emb
+	if searchEmbedder != nil {
+		if ok, stored := embed.SemanticIndexCompatible(db); !ok {
+			fmt.Fprintf(os.Stderr, "foldermcp search: WARNING semantic search disabled — "+
+				"index quantization %q is incompatible with this binary (%q); "+
+				"delete the store's index.db and re-run index-v3 to rebuild\n",
+				stored, embed.QuantizationModeString())
+			searchEmbedder = nil
+		}
+	}
+
+	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db, Embedder: searchEmbedder})
 	resp, err := srv.SearchBroadly(ctx, &pb.SearchBroadlyRequest{
 		Query:      query,
 		Mode:       searchMode,

@@ -64,6 +64,20 @@ func runV3Serve(ctx context.Context) error {
 		queryEmbedder = embed.NewEmbedder(modelPath, tokenizerPath)
 	}
 
+	// Read-side fingerprint gate (mirror of the indexer's EnsureFingerprint):
+	// refuse to run fixed-scale query codes against a store quantized with a
+	// different scheme — that would silently return garbage rankings. Degrade
+	// to lexical (FTS + filename) and say why, rather than serve nonsense.
+	if queryEmbedder != nil {
+		if ok, stored := embed.SemanticIndexCompatible(db); !ok {
+			fmt.Fprintf(os.Stderr, "foldermcp serve: WARNING semantic search disabled — "+
+				"index quantization %q is incompatible with this binary (%q); "+
+				"delete the store's index.db and re-run index-v3 to rebuild\n",
+				stored, embed.QuantizationModeString())
+			queryEmbedder = nil
+		}
+	}
+
 	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db, Embedder: queryEmbedder})
 	fmt.Fprintf(os.Stderr, "foldermcp serve: listening on %s\n", sockPath)
 	return srv.Serve(ctx, listener)

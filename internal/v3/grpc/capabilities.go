@@ -11,8 +11,14 @@ import (
 )
 
 const (
-	WireVersion               = 1
-	RetrievalSemanticsVersion = 1
+	WireVersion = 1
+	// Bumped 1→2 for the fixed-scale int8 quantization change: vector-search
+	// scores/rankings shift versus the prior per-vector scheme, so a client
+	// that caches or compares scores across server upgrades must treat results
+	// as not comparable. This is the field whose name promises exactly that
+	// "query scoring/ranking semantics changed" signal (schema_version tracks
+	// on-disk migrations, which also moved, but is a coarser signal).
+	RetrievalSemanticsVersion = 2
 )
 
 // ServerVersion is set at build time or defaults to the M1 dev version.
