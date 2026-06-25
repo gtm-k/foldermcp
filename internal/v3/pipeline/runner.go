@@ -440,6 +440,24 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 		return err
 	}
 
+	// FIX 1 (CRITICAL, systemic): close the zero-chunk-done hole on the PLAIN
+	// CODE/PROSE path. A .go/.md/.txt edited to empty (or whitespace-only) reaches
+	// here classed code/document; ChunkProse("") returns nil, runChunker produces
+	// ZERO chunks, and (pre-fix) all three passes were marked StatusDone — a file
+	// done-with-zero-chunks is silently unsearchable AND dropped from PendingFiles
+	// forever. This is the SAME silent-failure class the extracted-document path
+	// guards via ErrExtractionEmpty and the structured-data path via
+	// markDataSkipped("empty_content"). Enforce the shared invariant here too: a
+	// non-binary file that yields zero chunks is observably SKIPPED
+	// ("empty_content"), never embeddings=done. markSkipped re-marks all three
+	// passes (overwriting the structural/chunker 'done' rows runStructural/
+	// runChunker already wrote, within this same transaction) so status is
+	// consistent with the data path. An empty source file is legitimately empty,
+	// so this is StatusSkipped (not a failure), mirroring binary_content_detected.
+	if len(chunks) == 0 {
+		return r.markSkipped(ctx, tx, f, "empty_content")
+	}
+
 	// Pass 3: embeddings — buffered in 32-chunk batches (D1), drained
 	// before commit so all of the file's rows land in one transaction.
 	r.currentPass = PassEmbeddings
@@ -681,7 +699,7 @@ func (r *Runner) runDataDocument(ctx context.Context, tx *sql.Tx, f fileRow) err
 	// walker's 8 KB sample must be skipped, not chunked from garbage. Same
 	// predicate + same marker as the text path (single source of truth).
 	if walker.IsBinaryContent(content) {
-		return r.markDataSkipped(ctx, tx, f, "binary_content_detected")
+		return r.markSkipped(ctx, tx, f, "binary_content_detected")
 	}
 
 	// Empty / whitespace-only data file (FIX 1): an empty .csv/.json/.yaml/.xml
@@ -694,7 +712,7 @@ func (r *Runner) runDataDocument(ctx context.Context, tx *sql.Tx, f fileRow) err
 	// is NON-empty text and is NOT caught here — it parses to a valid empty
 	// structure and still produces a data_structured chunk.
 	if len(strings.TrimSpace(string(content))) == 0 {
-		return r.markDataSkipped(ctx, tx, f, "empty_content")
+		return r.markSkipped(ctx, tx, f, "empty_content")
 	}
 
 	title := filepath.Base(f.Path)
@@ -719,11 +737,17 @@ func (r *Runner) runDataDocument(ctx context.Context, tx *sql.Tx, f fileRow) err
 	}
 
 	if cerr != nil && errors.Is(cerr, chunker.ErrDataFallback) {
-		// The chunker classifies WHY it declined via its stats: an oversize/truncated
-		// document vs a malformed/ragged one. Surface that on the degraded path so
-		// "the index only reflects a prefix" is not lost (FIX 3).
+		// The chunker classifies WHY it declined via its sentinel + stats: a
+		// well-formed-but-empty structure ({}/[]) vs an oversize/truncated document
+		// vs a malformed/ragged one. Surface that on the degraded path so "the index
+		// only reflects a prefix" is not lost AND a valid empty config is not
+		// mislabeled malformed (FIX 3). ErrDataEmpty is checked FIRST because it is a
+		// subset of ErrDataFallback.
 		reason := "malformed"
-		if stats.Truncated {
+		switch {
+		case errors.Is(cerr, chunker.ErrDataEmpty):
+			reason = "empty_structure"
+		case stats.Truncated:
 			reason = "oversize"
 		}
 		return r.runDataProseFallback(ctx, tx, f, content, &stats, reason)
@@ -802,11 +826,15 @@ RETURNING chunk_id`, fileNodeID, text, c.ByteStart, c.ByteEnd, c.TokenCount, c.K
 	return r.embedPending(ctx, tx, f)
 }
 
-// markDataSkipped marks all three passes StatusSkipped with an observable marker
-// (e.g. "binary_content_detected", "empty_content") and inserts no chunks —
-// mirroring the text path's skip handling. A skipped data file is honestly
-// surfaced rather than counted as done-with-zero-chunks (silently unsearchable).
-func (r *Runner) markDataSkipped(ctx context.Context, tx *sql.Tx, f fileRow, marker string) error {
+// markSkipped marks all three passes StatusSkipped with an observable marker
+// (e.g. "binary_content_detected", "empty_content") and inserts no chunks. It is
+// the SINGLE shared guard enforcing the cross-path invariant "no file reaches
+// embeddings=done with zero chunks unless it is intentionally empty-skipped":
+// every path that detects a no-content / binary file (the text/code/prose path's
+// FIX 1 zero-chunk guard, the structured-data path's empty/binary skips) funnels
+// here so a skipped file is honestly surfaced rather than counted as
+// done-with-zero-chunks (silently unsearchable, dropped from PendingFiles forever).
+func (r *Runner) markSkipped(ctx context.Context, tx *sql.Tx, f fileRow, marker string) error {
 	for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
 		if err := markStatusTx(ctx, tx, f.ID, p, StatusSkipped, marker); err != nil {
 			return err
@@ -835,7 +863,7 @@ func (r *Runner) runDataProseFallback(ctx context.Context, tx *sql.Tx, f fileRow
 	// mark done-with-zero-chunks.
 	proseChunks := chunker.ChunkProse(string(content), r.Cfg, r.Counter)
 	if len(proseChunks) == 0 {
-		return r.markDataSkipped(ctx, tx, f, "empty_content")
+		return r.markSkipped(ctx, tx, f, "empty_content")
 	}
 	// Bound the fallback output (FIX 4): cap the chunk count for parity with the
 	// structured path's maxChunksPerDoc. Truncate-with-observable-note rather than

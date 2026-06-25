@@ -32,12 +32,17 @@ func (h *NodesHandler) Get(ctx context.Context, req *pb.GetNodesRequest) (*pb.Ge
 		placeholders = append(placeholders, '?')
 	}
 
+	// FIX 2: filter f.deleted_at IS NULL too (not only n.deleted_at). GetNodes is a
+	// by-id fetch that returns hydrated content without going through hydrateNodes,
+	// so it needs the same soft-deleted-file exclusion the hydrate choke point now
+	// enforces — otherwise a node whose file was soft-deleted by watch reconcile
+	// (node.deleted_at still NULL until the next purge) would leak via this path.
 	q := fmt.Sprintf(`
 SELECT n.node_id, n.file_id, f.path, n.node_type, n.name, f.content_class,
        COALESCE(n.language,''), n.provenance, COALESCE(n.confidence, 0.0),
        n.properties
 FROM nodes n JOIN files f ON f.file_id = n.file_id
-WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
+WHERE n.node_id IN (%s) AND n.deleted_at IS NULL AND f.deleted_at IS NULL`, placeholders)
 
 	rows, err := h.DB.QueryContext(ctx, q, args...)
 	if err != nil {

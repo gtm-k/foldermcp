@@ -46,6 +46,16 @@ type DataStats struct {
 // per-file failure — the file is still indexed, just as prose.
 var ErrDataFallback = errors.New("data_fallback_prose")
 
+// ErrDataEmpty is the SUBSET of ErrDataFallback for a well-formed but EMPTY
+// structure: a valid JSON "{}" / "[]" (or a YAML/XML document) that parses
+// cleanly yet flattens to ZERO outline leaves (FIX 3). It wraps ErrDataFallback
+// so the runner's existing fallback dispatch still prose-falls-back, but lets the
+// runner distinguish "valid empty config" (fallback_reason="empty_structure")
+// from a genuinely malformed document (fallback_reason="malformed"). An empty
+// config is not malformed; mislabeling it hides real malformed files in the same
+// bucket.
+var ErrDataEmpty = fmt.Errorf("data_empty_structure: %w", ErrDataFallback)
+
 const (
 	// csvScanCap bounds the bytes the CSV chunker reads from a file (D18 / Phase
 	// 5: "bounded scan, first 4 MB — no full-file slurp"). dtype inference and row

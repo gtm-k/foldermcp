@@ -122,6 +122,56 @@ func TestChunkDataMalformedFallsBack(t *testing.T) {
 	}
 }
 
+// TestChunkDataEmptyStructure: a well-formed but empty JSON object {} / array []
+// (zero leaves) is NOT malformed — it must return ErrDataEmpty (which still wraps
+// ErrDataFallback so the runner prose-falls-back) so the runner labels the node
+// fallback_reason="empty_structure", not "malformed" (FIX 3).
+func TestChunkDataEmptyStructure(t *testing.T) {
+	cases := []struct {
+		name, ext, body string
+	}{
+		{"empty-obj.json", ".json", `{}`},
+		{"empty-arr.json", ".json", `[]`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := writeTemp(t, c.name, c.body)
+			_, _, err := ChunkData(path, c.name, c.ext, DefaultConfig(), wordCounter{})
+			if !errors.Is(err, ErrDataEmpty) {
+				t.Fatalf("%s: err = %v, want ErrDataEmpty", c.name, err)
+			}
+			// ErrDataEmpty must remain a fallback so the runner's existing
+			// ErrDataFallback dispatch still prose-falls-back rather than failing.
+			if !errors.Is(err, ErrDataFallback) {
+				t.Fatalf("%s: ErrDataEmpty must wrap ErrDataFallback, got %v", c.name, err)
+			}
+		})
+	}
+}
+
+// TestChunkDataTrailingBraceRejected (A5 LOW gap): a JSON value with a trailing
+// bare "}" or "]" after the first complete value is rejected by the io.EOF check
+// — it is malformed (ErrDataFallback) and NOT a valid empty structure.
+func TestChunkDataTrailingBraceRejected(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"trailing-brace.json", `{"a":1}}`},
+		{"trailing-bracket.json", `[1,2]]`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := writeTemp(t, c.name, c.body)
+			_, _, err := ChunkData(path, c.name, ".json", DefaultConfig(), wordCounter{})
+			if !errors.Is(err, ErrDataFallback) {
+				t.Fatalf("%s: err = %v, want ErrDataFallback (trailing garbage)", c.name, err)
+			}
+			// A trailing bare brace is malformed, NOT an empty structure.
+			if errors.Is(err, ErrDataEmpty) {
+				t.Fatalf("%s: trailing garbage must NOT be ErrDataEmpty", c.name)
+			}
+		})
+	}
+}
+
 // TestChunkDataBoundedChunkCount: a deeply nested / large structure produces a
 // bounded number of chunks (never unbounded), via the per-file chunk cap.
 func TestChunkDataBoundedChunkCount(t *testing.T) {
