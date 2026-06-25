@@ -25,13 +25,19 @@ jobs:
       - name: Install uv
         run: pip install uv
 
+      # internal/v3 is owned by v3-ci.yml, which builds it with the required
+      # `-tags "cgo sqlite_fts5"` (its store needs the SQLite FTS5 module and
+      # cgo). This generic job runs untagged, so it must exclude internal/v3 —
+      # otherwise its tests fail at migration time with "no such module: fts5".
       - name: Run tests (Linux/macOS)
         if: runner.os != 'Windows'
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -coverprofile=coverage.out $(go list ./... | grep -v '/internal/v3')
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
-        run: go test -race ./...
+        run: |
+          $pkgs = go list ./... | Where-Object { $_ -notmatch 'internal/v3' }
+          go test -race $pkgs
 
       - name: Build binary
         if: runner.os != 'Windows'
