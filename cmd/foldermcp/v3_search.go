@@ -120,9 +120,16 @@ func formatSearchResults(resp *pb.SearchBroadlyResponse, query string) string {
 		if len(h.MatchedSources) > 0 {
 			matched = " (" + strings.Join(h.MatchedSources, "+") + ")"
 		}
-		fmt.Fprintf(&b, "\n%2d. [%.4f]%s %s\n", i+1, h.Score, matched, sanitizeTerminal(h.Path))
+		// Results are printed in fused-rank order (the ordinal IS the rank).
+		// We deliberately do NOT print h.Score: it is the Reciprocal Rank Fusion
+		// score (1/(k+rank+1)), a positional artifact, not a relevance magnitude —
+		// showing it invites readers to compare hits by a meaningless number.
+		// The honest signals are rank order and source agreement (how many
+		// independent sources matched, shown in parentheses). Surfacing a true
+		// per-source relevance score needs a wire-schema change (tracked separately).
+		fmt.Fprintf(&b, "\n%2d.%s %s\n", i+1, matched, sanitizeLine(h.Path))
 		if h.Title != "" && h.Title != h.Path {
-			fmt.Fprintf(&b, "    %s\n", sanitizeTerminal(h.Title))
+			fmt.Fprintf(&b, "    %s\n", sanitizeLine(h.Title))
 		}
 		if snip := strings.TrimSpace(sanitizeTerminal(h.Snippet)); snip != "" {
 			for _, line := range strings.Split(snip, "\n") {
@@ -142,16 +149,46 @@ func validSearchMode(m string) bool {
 	return false
 }
 
-// sanitizeTerminal drops control characters (including ANSI/OSC escapes, which
-// start with ESC 0x1b) from text that originates in indexed file content, so a
-// crafted file cannot inject terminal/CI-log escape sequences via search output.
-// Tab and newline are preserved for snippet layout.
+// unsafeTerminalRune reports whether r is a control or format character that must
+// never reach a terminal or CI log when it originates from indexed file content:
+//   - C0 controls 0x00-0x1F (including ESC 0x1b, the ANSI/OSC introducer),
+//   - DEL 0x7f,
+//   - C1 controls 0x80-0x9F (single-byte CSI 0x9b / OSC 0x9d / DCS 0x90),
+//   - Unicode line/paragraph separators U+2028/U+2029, and
+//   - BiDi override/isolate controls U+202A-U+202E and U+2066-U+2069
+//     (the "Trojan Source" class: visual reordering / line spoofing).
+//
+// Newline and tab are intentionally excluded so multi-line callers (snippets)
+// can keep them; single-line callers use sanitizeLine, which drops them too.
+func unsafeTerminalRune(r rune) bool {
+	return r < 0x20 || r == 0x7f ||
+		(r >= 0x80 && r <= 0x9f) ||
+		r == 0x2028 || r == 0x2029 ||
+		(r >= 0x202a && r <= 0x202e) ||
+		(r >= 0x2066 && r <= 0x2069)
+}
+
+// sanitizeTerminal strips unsafe control/format characters from multi-line text
+// (e.g. snippets), preserving newline and tab for layout, so crafted indexed
+// content cannot inject terminal/CI-log escape sequences via search output.
 func sanitizeTerminal(s string) string {
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' {
 			return r
 		}
-		if r < 0x20 || r == 0x7f {
+		if unsafeTerminalRune(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// sanitizeLine is sanitizeTerminal for single-line fields (paths, titles): it
+// additionally drops newline and tab so a crafted value cannot inject extra
+// output lines (terminal/CI-log line spoofing).
+func sanitizeLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || unsafeTerminalRune(r) {
 			return -1
 		}
 		return r

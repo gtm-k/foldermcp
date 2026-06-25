@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -159,42 +160,51 @@ func resolveModelPaths() (modelPath, tokenizerPath string, err error) {
 }
 
 // configureOrtLib points onnxruntime_go at the ONNX Runtime shared library, in
-// priority order:
+// priority order (see resolveOrtLib):
 //  1. $FOLDERMCP_ORT_LIB if set,
 //  2. an onnxruntime shared lib beside the executable (self-contained bundle),
-//  3. otherwise the library's default dlopen("onnxruntime.so") via the system
-//     search path (Linux with a system install).
+//  3. an onnxruntime shared lib in an ort/ subdir beside the executable
+//     (bundle/dev layout, e.g. the repo's bin/ort/),
+//  4. otherwise the library's default dlopen("onnxruntime.so") via the system
+//     search path — logged at WARN, because that path can resolve to an
+//     unrelated, version-incompatible install.
 //
-// Must be called before the first Embedder init in the process.
+// Must be called before the first Embedder init in the process. The selected
+// library (and why) is logged so an "ORT API version" mismatch downstream is
+// traceable to the exact file.
 //
 // Trust note: the exe-relative lookup assumes the install directory is no less
 // trusted than the executable itself (single-user bundle). In a shared install
 // dir that is writable by a lower-privileged principal than the binary's owner,
 // prefer setting FOLDERMCP_ORT_LIB to a vetted absolute path.
 func configureOrtLib() {
-	lib := os.Getenv("FOLDERMCP_ORT_LIB")
-	if lib == "" {
-		if d := exeDir(); d != "" {
-			// Only the platform-correct library name, so a stray Windows DLL
-			// left beside a Linux/macOS binary is never selected (Codex review).
-			var name string
-			switch runtime.GOOS {
-			case "windows":
-				name = "onnxruntime.dll"
-			case "darwin":
-				name = "libonnxruntime.dylib"
-			default:
-				name = "libonnxruntime.so"
-			}
-			cand := filepath.Join(d, name)
-			if _, statErr := os.Stat(cand); statErr == nil {
-				lib = cand
-			}
-		}
-	}
+	// Resolution logic lives in resolveOrtLib (pure, unit-tested). It probes,
+	// in order: $FOLDERMCP_ORT_LIB, the lib beside the exe, then an ort/ subdir
+	// beside the exe. Only the platform-correct library name is considered, so a
+	// stray Windows DLL left beside a Linux/macOS binary is never selected.
+	lib, source := resolveOrtLib(
+		os.Getenv("FOLDERMCP_ORT_LIB"),
+		exeDir(),
+		runtime.GOOS,
+		// Require a regular file (os.Stat follows symlinks, so a symlink to a
+		// real lib still qualifies) — a directory or other object named like the
+		// lib must not short-circuit the ort/ subdir + system fallbacks.
+		func(p string) bool { fi, err := os.Stat(p); return err == nil && fi.Mode().IsRegular() },
+	)
 	if lib != "" {
+		// Observability: record which library (and why) was selected so a
+		// downstream "ORT API version" mismatch is traceable to the exact file.
+		slog.Info("ort: using ONNX Runtime shared library", "path", lib, "source", source)
 		ort.SetSharedLibraryPath(lib)
+		return
 	}
+	// source == "system": nothing bundled beside the executable. The OS loader
+	// will dlopen onnxruntime by name from its default search path, which can
+	// resolve to an unrelated, possibly incompatible install (the exact failure
+	// QA hit: a stray ORT 1.17.1 on PATH vs. the binary's required API). Warn so
+	// it is diagnosable; set FOLDERMCP_ORT_LIB to pin a vetted library.
+	slog.Warn("ort: no bundled ONNX Runtime found beside the executable; falling back to the system loader",
+		"hint", "set FOLDERMCP_ORT_LIB to pin a specific library")
 }
 
 // newV3Runner assembles the four-pass pipeline orchestrator (D28b.3)

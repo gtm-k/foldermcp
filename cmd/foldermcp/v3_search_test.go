@@ -39,6 +39,36 @@ func TestFormatSearchResultsWithHits(t *testing.T) {
 	}
 }
 
+func TestFormatSearchResultsOmitsMisleadingRRFScore(t *testing.T) {
+	// The per-result Score is the Reciprocal Rank Fusion score — a positional
+	// artifact (1/(k+rank+1)), NOT a relevance magnitude. Rendering it as a
+	// 4-decimal number invites readers to compare hits by a number that only
+	// encodes rank. The human output must instead convey order (rank ordinal)
+	// and source agreement (how many independent sources matched), and must not
+	// leak the raw RRF float.
+	resp := &pb.SearchBroadlyResponse{
+		OverallStatus: "ok",
+		Completeness:  "full",
+		Results: []*pb.SearchHit{
+			{Path: "/a.go", Score: 0.0323, MatchedSources: []string{"fts", "vector"}},
+			{Path: "/b.go", Score: 0.0164, MatchedSources: []string{"vector"}},
+		},
+	}
+	out := formatSearchResults(resp, "q")
+
+	for _, leak := range []string{"0.0323", "0.0164"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("raw RRF score %q must not appear in human output:\n%s", leak, out)
+		}
+	}
+	if !strings.Contains(out, "1.") || !strings.Contains(out, "2.") {
+		t.Errorf("rank ordinals must remain visible:\n%s", out)
+	}
+	if !strings.Contains(out, "(fts+vector)") || !strings.Contains(out, "(vector)") {
+		t.Errorf("source agreement must remain visible:\n%s", out)
+	}
+}
+
 func TestFormatSearchResultsNoHits(t *testing.T) {
 	resp := &pb.SearchBroadlyResponse{OverallStatus: "ok", Completeness: "full"}
 	out := formatSearchResults(resp, "zzz")
@@ -76,5 +106,80 @@ func TestSanitizeTerminalStripsEscapes(t *testing.T) {
 		if !strings.Contains(got, w) {
 			t.Errorf("printable text %q must remain: %q", w, got)
 		}
+	}
+}
+
+func TestSanitizeTerminalStripsC1Controls(t *testing.T) {
+	// C1 control codes (U+0080–U+009F) include single-byte escape introducers —
+	// CSI (U+009B), OSC (U+009D), DCS (U+0090) — that a crafted indexed file could
+	// use to inject terminal sequences, bypassing the ESC (0x1b) strip. They must
+	// be removed just like C0 controls.
+	in := "ok\u009b31mRED\u009dhijack\u0090dcs\u0080\u009fend"
+	got := sanitizeTerminal(in)
+	for _, bad := range []rune{0x80, 0x90, 0x9b, 0x9d, 0x9f} {
+		if strings.ContainsRune(got, bad) {
+			t.Errorf("C1 control %#x survived sanitization: %q", bad, got)
+		}
+	}
+	// Printable text on either side of the stripped controls must survive.
+	for _, w := range []string{"ok", "RED", "hijack", "dcs", "end"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("printable text %q must remain: %q", w, got)
+		}
+	}
+}
+
+func TestSanitizeTerminalStripsLineSepAndBiDi(t *testing.T) {
+	// Unicode line/paragraph separators (U+2028/U+2029) and BiDi override/isolate
+	// controls (U+202A–202E, U+2066–2069, the "Trojan Source" class) must be
+	// stripped — they enable line-spoofing and visual reordering in terminals.
+	in := "a\u2028b\u2029c\u202ad\u202ee\u2066f\u2069g"
+	got := sanitizeTerminal(in)
+	for _, bad := range []rune{0x2028, 0x2029, 0x202a, 0x202e, 0x2066, 0x2069} {
+		if strings.ContainsRune(got, bad) {
+			t.Errorf("format control %#x survived sanitization: %q", bad, got)
+		}
+	}
+	for _, w := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("printable text %q must remain: %q", w, got)
+		}
+	}
+}
+
+func TestSanitizeLineDropsNewlinesAndControls(t *testing.T) {
+	// sanitizeLine is for single-line fields (path, title): it drops newlines and
+	// tabs (so a crafted value cannot inject extra output lines) AND everything
+	// sanitizeTerminal strips (C0/DEL/C1/line-sep/BiDi).
+	got := sanitizeLine("path/to\nFAKE\trest\u009bx\u202ey")
+	if strings.ContainsAny(got, "\n\t") {
+		t.Errorf("sanitizeLine must drop newlines/tabs: %q", got)
+	}
+	for _, bad := range []rune{0x009b, 0x202e} {
+		if strings.ContainsRune(got, bad) {
+			t.Errorf("sanitizeLine must also strip control %#x: %q", bad, got)
+		}
+	}
+	if !strings.Contains(got, "FAKE") || !strings.Contains(got, "rest") {
+		t.Errorf("printable text must remain: %q", got)
+	}
+}
+
+func TestFormatSearchResultsPathTitleAreSingleLine(t *testing.T) {
+	// A crafted path/title with an embedded newline must not inject a separate
+	// output line (terminal/CI log spoofing).
+	resp := &pb.SearchBroadlyResponse{
+		OverallStatus: "ok",
+		Completeness:  "full",
+		Results: []*pb.SearchHit{
+			{Path: "real.go\nINJECTED", Title: "Title\nALSOINJECTED", MatchedSources: []string{"fts"}},
+		},
+	}
+	out := formatSearchResults(resp, "q")
+	if strings.Contains(out, "real.go\nINJECTED") || strings.Contains(out, "Title\nALSOINJECTED") {
+		t.Errorf("path/title newline must be stripped (line-injection vector):\n%q", out)
+	}
+	if !strings.Contains(out, "real.goINJECTED") {
+		t.Errorf("expected path rendered with newline removed:\n%q", out)
 	}
 }
