@@ -66,8 +66,9 @@ func TestTokenizerEncodeSkipsIfMissing(t *testing.T) {
 	if len(mask) != MaxSeqLen || len(tts) != MaxSeqLen {
 		t.Error("mask/tts length mismatch")
 	}
-	if ids[0] != tok.clsID {
-		t.Errorf("ids[0] = %d, want CLS (%d)", ids[0], tok.clsID)
+	const clsID = 101 // [CLS] in all-MiniLM-L6-v2's BERT vocab
+	if ids[0] != clsID {
+		t.Errorf("ids[0] = %d, want CLS (%d)", ids[0], clsID)
 	}
 	// "hello world" → [CLS] hello world [SEP] [PAD]...
 	// At least 4 tokens should have mask=1
