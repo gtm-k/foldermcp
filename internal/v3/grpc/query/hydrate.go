@@ -45,11 +45,11 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 			&h.ContentClass, &h.Language, &h.Provenance, &h.Confidence, &h.PropertiesJson); err != nil {
 			return status.Errorf(codes.Internal, "hydrate scan: %v", err)
 		}
-		// MED-3: PropertiesJson can carry a secret in a Go symbol signature
-		// (e.g. `const apiKey = "..."`). Redact at this shared choke point so
-		// SearchBroadly/Inspect inherit it; node chunks are redacted in
-		// fetchTopChunks below.
-		h.PropertiesJson = redactEgressText(h.PropertiesJson, "node_id", h.NodeId)
+		// MED-3 / F1: PropertiesJson can carry a secret in a Go symbol signature
+		// (e.g. `const apiKey = "..."`). Redact STRUCTURALLY at this shared choke
+		// point so SearchBroadly/Inspect inherit it AND the egressed value stays
+		// valid JSON; node chunks are flat text, redacted in fetchTopChunks below.
+		h.PropertiesJson = redactPropertiesJSON(h.PropertiesJson, "node_id", h.NodeId)
 		nodeByID[h.NodeId] = h
 	}
 	if err := rows.Err(); err != nil {

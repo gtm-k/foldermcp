@@ -3,7 +3,9 @@
 package query
 
 import (
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,19 +53,97 @@ const egressWarnInterval = 30 * time.Second
 func redactEgressText(in string, idKind string, id int64) string {
 	out := egressSanitizer.Sanitize(in)
 	if out != in {
-		egressRedactionCount.Add(1)
-		egressWarnMu.Lock()
-		now := time.Now()
-		if now.Sub(egressWarnLast) >= egressWarnInterval {
-			egressWarnLast = now
-			egressWarnMu.Unlock()
-			slog.Default().Warn("query: egress redaction fired — an unredacted secret reached the index (ingest miss or pre-Phase-7 index); display path masked it",
-				idKind, id, "egress_redactions_total", egressRedactionCount.Load())
-		} else {
-			egressWarnMu.Unlock()
-		}
+		noteEgressRedaction(idKind, id)
 	}
 	return out
+}
+
+// noteEgressRedaction records that an egress pass actually masked a secret and
+// emits the rate-limited WARN (MED-6). Shared by redactEgressText and the
+// structural PropertiesJson path so both keep identical observability.
+func noteEgressRedaction(idKind string, id int64) {
+	egressRedactionCount.Add(1)
+	egressWarnMu.Lock()
+	now := time.Now()
+	if now.Sub(egressWarnLast) >= egressWarnInterval {
+		egressWarnLast = now
+		egressWarnMu.Unlock()
+		slog.Default().Warn("query: egress redaction fired — an unredacted secret reached the index (ingest miss or pre-Phase-7 index); display path masked it",
+			idKind, id, "egress_redactions_total", egressRedactionCount.Load())
+	} else {
+		egressWarnMu.Unlock()
+	}
+}
+
+// redactPropertiesJSON redacts secrets from a node's PropertiesJson STRUCTURALLY
+// rather than as flat text (F1). PropertiesJson is a JSON STRING; running the
+// flat egress Sanitizer over the whole string lets its greedy patterns
+// (api[_-]?key…\S{10,}, sk-…{20,}) consume the closing quote and brace, yielding
+// INVALID JSON that breaks any consumer doing json.Unmarshal on properties_json.
+//
+// Instead we json.Unmarshal into a generic structure, recursively sanitize every
+// STRING value (and map KEYS — a secret could be a key) with the egress
+// Sanitizer, then re-marshal. Result is ALWAYS valid JSON AND secret-free.
+//
+// Fallback: empty/whitespace input passes through unchanged; if Unmarshal fails
+// (the stored properties is not valid JSON) we do NOT emit the corrupt-but-
+// flat-redacted string — we return a valid empty object "{}" so the egress
+// contract (valid JSON, no leaked secret) holds even on malformed storage.
+func redactPropertiesJSON(raw string, idKind string, id int64) string {
+	if strings.TrimSpace(raw) == "" {
+		return raw
+	}
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		// Malformed stored properties: never emit corrupt output, never risk
+		// leaking an unparsed secret. Treat as an egress catch for observability.
+		noteEgressRedaction(idKind, id)
+		return "{}"
+	}
+	changed := false
+	v = sanitizeJSONValue(v, &changed)
+	if !changed {
+		return raw
+	}
+	noteEgressRedaction(idKind, id)
+	out, err := json.Marshal(v)
+	if err != nil {
+		// Re-marshal of a value that was just unmarshalled should not fail; if it
+		// somehow does, fall back to a valid empty object rather than the raw.
+		return "{}"
+	}
+	return string(out)
+}
+
+// sanitizeJSONValue recursively applies the egress Sanitizer to every string
+// VALUE and map KEY in a decoded JSON value, setting *changed if anything was
+// masked. Numbers, bools and null pass through untouched.
+func sanitizeJSONValue(v any, changed *bool) any {
+	switch t := v.(type) {
+	case string:
+		s := egressSanitizer.Sanitize(t)
+		if s != t {
+			*changed = true
+		}
+		return s
+	case []any:
+		for i, e := range t {
+			t[i] = sanitizeJSONValue(e, changed)
+		}
+		return t
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			nk := egressSanitizer.Sanitize(k)
+			if nk != k {
+				*changed = true
+			}
+			out[nk] = sanitizeJSONValue(e, changed)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // redactHydratedChunk sanitizes a chunk's Text in place at the shared hydration
@@ -77,12 +157,15 @@ func redactHydratedChunk(c *pb.HydratedChunk) {
 
 // redactHydratedNodeFields sanitizes the free-text fields a hydrated node carries
 // to the client: PropertiesJson (which can carry a secret in a Go symbol
-// signature, e.g. `const apiKey = "..."`) and any hydrated chunk text. Nil-safe.
+// signature, e.g. `const apiKey = "..."`) and any hydrated chunk text.
+// PropertiesJson is redacted STRUCTURALLY (redactPropertiesJSON) so the egressed
+// value stays valid JSON; chunk text is flat text and uses the flat Sanitizer.
+// Nil-safe.
 func redactHydratedNodeFields(n *pb.HydratedNode) {
 	if n == nil {
 		return
 	}
-	n.PropertiesJson = redactEgressText(n.PropertiesJson, "node_id", n.NodeId)
+	n.PropertiesJson = redactPropertiesJSON(n.PropertiesJson, "node_id", n.NodeId)
 	for _, c := range n.Chunks {
 		redactHydratedChunk(c)
 	}
