@@ -3,6 +3,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -162,6 +164,218 @@ func TestSanitizeLineDropsNewlinesAndControls(t *testing.T) {
 	}
 	if !strings.Contains(got, "FAKE") || !strings.Contains(got, "rest") {
 		t.Errorf("printable text must remain: %q", got)
+	}
+}
+
+// --- A8: JSON output, exit codes, client-side filters ---
+
+func TestSearchExitCode(t *testing.T) {
+	cases := []struct {
+		name string
+		resp *pb.SearchBroadlyResponse
+		err  error
+		want int
+	}{
+		{"error wins", &pb.SearchBroadlyResponse{Results: []*pb.SearchHit{{Path: "/a"}}}, errors.New("boom"), 2},
+		{"error nil resp", nil, errors.New("boom"), 2},
+		{"hits", &pb.SearchBroadlyResponse{Results: []*pb.SearchHit{{Path: "/a"}}}, nil, 0},
+		{"zero hits", &pb.SearchBroadlyResponse{Results: nil}, nil, 1},
+		{"nil resp no err", nil, nil, 1},
+		// In-band failure: the handler signals backend/required-source failure via
+		// OverallStatus="error" with a nil Go error. It must dominate the zero-hits
+		// check so a broken backend is NOT mistaken for a legitimate empty result.
+		{"in-band error zero results", &pb.SearchBroadlyResponse{OverallStatus: "error"}, nil, 2},
+		{"in-band error with a result", &pb.SearchBroadlyResponse{OverallStatus: "error", Results: []*pb.SearchHit{{Path: "/a"}}}, nil, 2},
+		// "degraded" is partial success WITH hits — intentionally NOT an error.
+		{"degraded with hits stays 0", &pb.SearchBroadlyResponse{OverallStatus: "degraded", Results: []*pb.SearchHit{{Path: "/a"}}}, nil, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := searchExitCode(c.resp, c.err); got != c.want {
+				t.Errorf("searchExitCode(%s) = %d, want %d", c.name, got, c.want)
+			}
+		})
+	}
+}
+
+func TestFormatSearchResultsJSONSchema(t *testing.T) {
+	resp := &pb.SearchBroadlyResponse{
+		OverallStatus: "ok",
+		Completeness:  "full",
+		Sources: []*pb.SourceStatus{
+			{SourceName: "fts", Status: "OK", LatencyMs: 2},
+			{SourceName: "vector", Status: "OK", LatencyMs: 15},
+		},
+		Results: []*pb.SearchHit{
+			{Path: "/repo/config.go", Title: "config", Score: 0.0323, MatchedSources: []string{"fts", "vector"}, Snippet: "type Config struct"},
+		},
+	}
+	out := formatSearchResultsJSON(resp, "database config")
+
+	var doc struct {
+		Query        string `json:"query"`
+		Status       string `json:"status"`
+		Completeness string `json:"completeness"`
+		Sources      []struct {
+			Name      string `json:"name"`
+			Status    string `json:"status"`
+			LatencyMs int64  `json:"latency_ms"`
+		} `json:"sources"`
+		Results []struct {
+			Rank           int      `json:"rank"`
+			Path           string   `json:"path"`
+			Title          string   `json:"title"`
+			Snippet        string   `json:"snippet"`
+			MatchedSources []string `json:"matched_sources"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if doc.Query != "database config" || doc.Status != "ok" || doc.Completeness != "full" {
+		t.Errorf("top-level fields wrong: %+v", doc)
+	}
+	if len(doc.Sources) != 2 || doc.Sources[0].Name != "fts" || doc.Sources[1].LatencyMs != 15 {
+		t.Errorf("sources wrong: %+v", doc.Sources)
+	}
+	if len(doc.Results) != 1 {
+		t.Fatalf("want 1 result, got %d", len(doc.Results))
+	}
+	r := doc.Results[0]
+	if r.Rank != 1 || r.Path != "/repo/config.go" || r.Title != "config" || r.Snippet != "type Config struct" {
+		t.Errorf("result fields wrong: %+v", r)
+	}
+	if len(r.MatchedSources) != 2 {
+		t.Errorf("matched_sources wrong: %+v", r.MatchedSources)
+	}
+}
+
+func TestFormatSearchResultsJSONOmitsScore(t *testing.T) {
+	// The same no-misleading-RRF-score principle as the human formatter: the raw
+	// fusion score must not appear as a relevance magnitude in JSON either.
+	resp := &pb.SearchBroadlyResponse{
+		OverallStatus: "ok",
+		Results: []*pb.SearchHit{
+			{Path: "/a.go", Score: 0.0323, MatchedSources: []string{"fts"}},
+		},
+	}
+	out := formatSearchResultsJSON(resp, "q")
+	if strings.Contains(out, "0.0323") || strings.Contains(strings.ToLower(out), `"score"`) {
+		t.Errorf("JSON must not surface the raw RRF score:\n%s", out)
+	}
+}
+
+func TestFormatSearchResultsJSONSanitizesFields(t *testing.T) {
+	// Crafted indexed content must not inject control chars into JSON output.
+	resp := &pb.SearchBroadlyResponse{
+		OverallStatus: "ok",
+		Results: []*pb.SearchHit{
+			{Path: "real.go\x1b[31mX‮", Title: "title", Snippet: "snip\x00pet", MatchedSources: []string{"fts"}},
+		},
+	}
+	out := formatSearchResultsJSON(resp, "q")
+	for _, bad := range []rune{0x1b, 0x00, 0x202e, 0x009b} {
+		if strings.ContainsRune(out, bad) {
+			t.Errorf("control char %#x survived in JSON: %q", bad, out)
+		}
+	}
+}
+
+func TestFormatSearchResultsJSONEmpty(t *testing.T) {
+	resp := &pb.SearchBroadlyResponse{OverallStatus: "ok", Completeness: "full"}
+	out := formatSearchResultsJSON(resp, "zzz")
+	var doc struct {
+		Results []any `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("empty result not valid JSON: %v\n%s", err, out)
+	}
+	if len(doc.Results) != 0 {
+		t.Errorf("want empty results array, got %d", len(doc.Results))
+	}
+}
+
+func TestFilterSearchResultsByPathPrefix(t *testing.T) {
+	resp := &pb.SearchBroadlyResponse{
+		Results: []*pb.SearchHit{
+			{Path: "/repo/src/a.go"},
+			{Path: "/repo/docs/b.md"},
+			{Path: "/repo/src/c.go"},
+		},
+	}
+	got := filterSearchResults(resp, "", "/repo/src")
+	if len(got.Results) != 2 {
+		t.Fatalf("want 2 results under /repo/src, got %d", len(got.Results))
+	}
+	if got.Results[0].Path != "/repo/src/a.go" || got.Results[1].Path != "/repo/src/c.go" {
+		t.Errorf("wrong results: %+v", got.Results)
+	}
+	// original must be unmodified
+	if len(resp.Results) != 3 {
+		t.Errorf("filter mutated the input response")
+	}
+}
+
+func TestFilterSearchResultsByKindHeuristic(t *testing.T) {
+	resp := &pb.SearchBroadlyResponse{
+		Results: []*pb.SearchHit{
+			{Path: "/r/a.go"},
+			{Path: "/r/b.md"},
+			{Path: "/r/c.pdf"},
+			{Path: "/r/d.csv"},
+			{Path: "/r/e.py"},
+		},
+	}
+	if got := filterSearchResults(resp, "code", ""); len(got.Results) != 2 {
+		t.Errorf("kind=code want 2 (.go,.py), got %d: %+v", len(got.Results), got.Results)
+	}
+	if got := filterSearchResults(resp, "prose", ""); len(got.Results) != 1 || got.Results[0].Path != "/r/b.md" {
+		t.Errorf("kind=prose want .md, got %+v", got.Results)
+	}
+	if got := filterSearchResults(resp, "pdf", ""); len(got.Results) != 1 || got.Results[0].Path != "/r/c.pdf" {
+		t.Errorf("kind=pdf want .pdf, got %+v", got.Results)
+	}
+	if got := filterSearchResults(resp, "csv", ""); len(got.Results) != 1 || got.Results[0].Path != "/r/d.csv" {
+		t.Errorf("kind=csv want .csv, got %+v", got.Results)
+	}
+}
+
+func TestFilterSearchResultsRerank(t *testing.T) {
+	// After filtering, JSON ranks must renumber 1..N (no gaps from dropped hits).
+	resp := &pb.SearchBroadlyResponse{
+		OverallStatus: "ok",
+		Results: []*pb.SearchHit{
+			{Path: "/r/skip.md", MatchedSources: []string{"fts"}},
+			{Path: "/r/keep1.go", MatchedSources: []string{"fts"}},
+			{Path: "/r/keep2.go", MatchedSources: []string{"fts"}},
+		},
+	}
+	filtered := filterSearchResults(resp, "code", "")
+	out := formatSearchResultsJSON(filtered, "q")
+	var doc struct {
+		Results []struct {
+			Rank int    `json:"rank"`
+			Path string `json:"path"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Results) != 2 || doc.Results[0].Rank != 1 || doc.Results[1].Rank != 2 {
+		t.Errorf("ranks must renumber 1..N after filtering: %+v", doc.Results)
+	}
+}
+
+func TestValidSearchKind(t *testing.T) {
+	for _, k := range []string{"", "code", "prose", "pdf", "csv"} {
+		if !validSearchKind(k) {
+			t.Errorf("kind %q should be valid", k)
+		}
+	}
+	for _, k := range []string{"image", "Code", "go"} {
+		if validSearchKind(k) {
+			t.Errorf("kind %q should be invalid", k)
+		}
 	}
 }
 
