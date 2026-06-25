@@ -13,8 +13,10 @@ builds a "search brain" in a **SQLite database on your own disk**, and serves it
 Your assistant can then find the right piece by **meaning**, not just keywords — even when the
 folder lives on a shared network drive, and **without uploading a single byte to the cloud**.
 
-> **Status.** v3 (local semantic retrieval, described below) is the active line of development
-> and ships behind transitional `-v3` subcommands built from source. The original **v0.1.0 MCP
+> **Status — v3 is an early preview.** Today it does local semantic + keyword search over
+> **source code and Markdown/text files**, built from source behind transitional `-v3` subcommands.
+> Structured-data files (CSV/JSON/YAML), PDF/Office text, and images are **not indexed yet**, and
+> there is no live file-watcher — all on the [roadmap](#roadmap) below. The original **v0.1.0 MCP
 > tool server** — turning a folder of functions and scripts into callable MCP tools — remains
 > available and is documented [further down](#v010--mcp-tool-server).
 
@@ -22,7 +24,7 @@ folder lives on a shared network drive, and **without uploading a single byte to
 
 FolderMCP is a **split-daemon** design: a heavy *indexer* that writes the index, and a fast,
 read-only *query server* that answers searches. They never block each other, and they share one
-SQLite file.
+SQLite database.
 
 ```mermaid
 flowchart TB
@@ -31,7 +33,7 @@ flowchart TB
       direction TB
       IDX[index-v3<br/>indexer · writes<br/>walk → chunk → embed]
       QRY[serve-v3<br/>query server · read-only<br/>hybrid search]
-      STORE[(index.db · one SQLite file<br/>metadata · FTS5 keywords<br/>sqlite-vec vectors · pipeline state)]
+      STORE[(index.db · one SQLite database<br/>metadata · FTS5 keywords<br/>sqlite-vec vectors · pipeline state)]
       IDX -->|writes| STORE
       QRY -->|reads| STORE
     end
@@ -148,14 +150,14 @@ runtime sitting beside the binary, so those are optional there.
 |-------|--------|-----|
 | Language | **Go** | One static binary per OS; easy distribution; good concurrency for the parallel search channels. |
 | CLI | **Cobra** | Clean subcommands and flag handling. |
-| Storage + lexical | **SQLite + FTS5** | A full database in one file, zero server; FTS5 gives BM25 keyword search. |
-| Vector index | **sqlite-vec** | Stores 384-dim vectors *inside the same SQLite file* with exact KNN — no separate vector database, preserving the single-file design. |
+| Storage + lexical | **SQLite + FTS5** | A complete SQL database in-process, zero server; FTS5 gives BM25 keyword search. |
+| Vector index | **sqlite-vec** | Stores 384-dim vectors *inside the same SQLite database* with exact KNN — so there is no separate vector store to keep in sync. |
 | Embeddings | **ONNX Runtime + all-MiniLM-L6-v2** | A small (~90 MB) model run locally; text → meaning-vectors with no cloud API. |
 | Code parsing | **tree-sitter** | Real syntax trees (Go & Python today) so chunks align to functions and classes. |
 | Transport | **gRPC over Unix socket / named pipe** | Fast, typed local IPC between the shim and query server; abstracted per OS. |
 | AI interface | **MCP** | The standard Claude, Cursor, and VS Code already speak — three tools, instant compatibility. |
 
-The unifying thread: every choice protects four properties at once — **single-file**, **no
+The unifying thread: every choice protects four properties at once — **single-store**, **no
 server/cloud**, **works on network drives**, and **private**.
 
 ## v0.1.0 — MCP tool server
@@ -211,6 +213,18 @@ internal/
   sandbox/ server/ state/ studio/ watcher/ workspace/   (v0.1 tool server)
 examples/            sample projects (Python, OpenAPI, Shell)
 ```
+
+## Roadmap
+
+v3 is an early preview focused on code and text. Planned next, in rough priority order:
+
+- **Index structured-data files** — `.csv`, `.json`, `.yaml`, `.xml` (currently classified as data and skipped).
+- **PDF & Office text extraction** — index the text inside `.pdf`, `.docx`, and `.odt` (currently skipped).
+- **More languages with AST structure** — tree-sitter grammars beyond Go and Python (others index as prose today).
+- **Live freshness** — a file-watcher that re-indexes changed files automatically (today re-indexing is a manual re-run).
+- **One-command client setup** — write the MCP client config for v3, as `connect` does for v0.1.0.
+- **Image search** — vision embeddings so images become searchable in their own space.
+- **Prebuilt bundles** — native macOS and Linux releases (a Windows bundle exists today via `make v3-package-windows`).
 
 ## Contributing
 
