@@ -67,6 +67,13 @@ LIMIT ?`, match, k)
 	}
 	defer func() { _ = rows.Close() }()
 
+	// FINDING 1 (retrieval quality): FTS matches at the CHUNK level (chunks_fts.rowid =
+	// chunk_id) but ScoredNode only carries node_id. Capture, per node, the best-scoring
+	// matched chunk_id (rows are ordered by BM25 score DESC, so the FIRST row for a node
+	// is its best-matching chunk) and thread it INTERNALLY into hydration so the matched
+	// chunk is hydrated and surfaced as the snippet instead of the lowest-chunk_id
+	// Chunks[0]. No proto field is added; the map never leaves this package.
+	matchedChunks := make(map[int64]int64)
 	for rows.Next() {
 		var chunkID, nodeID int64
 		var score float64
@@ -76,10 +83,14 @@ LIMIT ?`, match, k)
 			resp.Status.LatencyMs = int32(time.Since(start).Milliseconds())
 			return resp, nil
 		}
-		resp.Results = append(resp.Results, &pb.ScoredNode{
-			NodeId: nodeID,
-			Score:  float32(score),
-		})
+		if _, seen := matchedChunks[nodeID]; !seen {
+			// First (highest-BM25) row for this node = its best matched chunk.
+			matchedChunks[nodeID] = chunkID
+			resp.Results = append(resp.Results, &pb.ScoredNode{
+				NodeId: nodeID,
+				Score:  float32(score),
+			})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		resp.Status.Status = "CONTRACT_ERROR"
@@ -89,7 +100,7 @@ LIMIT ?`, match, k)
 	}
 
 	if req.Hydrate != nil {
-		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate); err != nil {
+		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate, matchedChunks); err != nil {
 			return nil, status.Errorf(codes.Internal, "hydrate: %v", err)
 		}
 	}

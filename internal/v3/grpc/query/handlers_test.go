@@ -4,6 +4,7 @@ package query
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
@@ -249,6 +250,181 @@ func nodeIDs(nodes []*pb.HydratedNode) []int64 {
 		out[i] = n.NodeId
 	}
 	return out
+}
+
+// TestMatchedChunkSurfacedInSnippet (FINDING 1, retrieval quality): A4/A5 broke the
+// M1 assumption that one node ~= one chunk. A whole PDF/DOCX/CSV is ONE node holding
+// MANY chunks. The vector and FTS sources match at the CHUNK level, but the M1 hydrate
+// path discarded the matched chunk_id, fetched only `chunksPerNode` chunks ORDER BY
+// chunk_id (the title page / schema header), and firstSnippet showed Chunks[0]. A query
+// matching chunk #4 of 5 ranked the node correctly but showed chunk #1 and never
+// hydrated chunk #4 — the match was invisible. The fix threads the best matched chunk_id
+// per node INTERNALLY (no proto change) so (a) the matched chunk IS hydrated and (b) it
+// is Chunks[0] so firstSnippet derives the snippet from it.
+//
+// This drives both the vector and FTS paths against a multi-chunk node where the match
+// is on a NON-first chunk, and asserts the matched chunk is present and is Chunks[0].
+func TestMatchedChunkSurfacedInSnippet(t *testing.T) {
+	db := openTestDB(t)
+
+	// One file/node holding FIVE distinct chunks — a multi-chunk document node (PDF/CSV).
+	mustExec(t, db, `INSERT INTO files(path,sha256,size,mtime,mime,content_class,parent_dir,last_seen)
+		VALUES('/big.pdf',X'AA',1,1,'application/pdf','document','/',1)`)
+	mustExec(t, db, `INSERT INTO nodes(node_id,file_id,node_type,name,provenance,created_at,updated_at)
+		VALUES(1,1,'doc','big','EXTRACTED',1,1)`)
+	chunkTexts := []string{
+		"title page front matter cover",          // chunk 1 (Chunks[0] under ORDER BY chunk_id)
+		"table of contents listing sections",     // chunk 2
+		"introduction overview background",       // chunk 3
+		"deep technical tungsten alloy analysis", // chunk 4 — THE MATCH
+		"appendix references bibliography",       // chunk 5
+	}
+	for i, txt := range chunkTexts {
+		mustExec(t, db, `INSERT INTO chunks(chunk_id,node_id,text,byte_start,byte_end,token_count,chunk_kind)
+			VALUES(?,1,?,0,?,?,'pdf_text')`, i+1, txt, len(txt), len(txt)/4+1)
+	}
+	// Embeddings: make chunk 4 the closest match to the query vector and the others
+	// progressively farther, so the vector source's best hit for node 1 is chunk 4.
+	query := make([]byte, 384)
+	for i := range query {
+		query[i] = 100
+	}
+	// chunk_id -> offset from the query vector; chunk 4 (idx 3) is identical (closest).
+	offsets := []int{40, 30, 20, 0, 25}
+	for i, off := range offsets {
+		vec := make([]byte, 384)
+		for j := range vec {
+			vec[j] = byte(100 + off)
+		}
+		mustExec(t, db, `INSERT INTO embeddings(chunk_id, embedding) VALUES(?, vec_int8(?))`, i+1, vec)
+	}
+
+	hint := &pb.HydrationHint{Chunks: true, ChunksPerNode: 2}
+
+	// --- Vector path: best matched chunk is chunk 4. ---
+	vh := &VectorHandler{DB: db}
+	vresp, err := vh.Search(context.Background(), &pb.VectorSearchRequest{QueryEmbeddingInt8: query, K: 10, Hydrate: hint})
+	if err != nil {
+		t.Fatalf("vector search: %v", err)
+	}
+	assertMatchedChunkSurfaced(t, "vector", vresp.Results, 1, 4, "deep technical tungsten alloy analysis")
+
+	// --- FTS path: the query term lives ONLY in chunk 4. ---
+	fh := &FTSHandler{DB: db}
+	fresp, err := fh.Search(context.Background(), &pb.FTSSearchRequest{Query: "tungsten", K: 10, Hydrate: hint})
+	if err != nil {
+		t.Fatalf("fts search: %v", err)
+	}
+	assertMatchedChunkSurfaced(t, "fts", fresp.Results, 1, 4, "deep technical tungsten alloy analysis")
+
+	// --- firstSnippet must derive from the matched chunk's text, NOT chunk #1's. ---
+	for _, n := range []*pb.HydratedNode{nodeHydrated(vresp.Results, 1), nodeHydrated(fresp.Results, 1)} {
+		if n == nil {
+			t.Fatal("node 1 not hydrated")
+		}
+		snip := tools_firstSnippet(n)
+		if strings.Contains(snip, "title page") {
+			t.Errorf("snippet derived from chunk #1 (title page), want chunk #4: %q", snip)
+		}
+		if !strings.Contains(snip, "tungsten") {
+			t.Errorf("snippet does not contain matched chunk #4 text: %q", snip)
+		}
+	}
+}
+
+// TestSingleChunkNodeUnchanged (FINDING 1 regression): a single-chunk code node (the M1
+// common case) has no non-first matched chunk to surface, so it must keep returning its
+// one chunk's snippet — the fix must not regress code nodes.
+func TestSingleChunkNodeUnchanged(t *testing.T) {
+	db := openTestDB(t)
+	mustExec(t, db, `INSERT INTO files(path,sha256,size,mtime,mime,content_class,parent_dir,last_seen)
+		VALUES('/a.go',X'BB',1,1,'text/x-go','code','/',1)`)
+	mustExec(t, db, `INSERT INTO nodes(node_id,file_id,node_type,name,provenance,created_at,updated_at)
+		VALUES(1,1,'function','main','EXTRACTED',1,1)`)
+	mustExec(t, db, `INSERT INTO chunks(chunk_id,node_id,text,byte_start,byte_end,token_count,chunk_kind)
+		VALUES(1,1,'func main tungsten body',0,23,4,'code_ast')`)
+	vec := make([]byte, 384)
+	for i := range vec {
+		vec[i] = byte(i % 127)
+	}
+	mustExec(t, db, `INSERT INTO embeddings(chunk_id, embedding) VALUES(1, vec_int8(?))`, vec)
+
+	hint := &pb.HydrationHint{Chunks: true, ChunksPerNode: 2}
+	fh := &FTSHandler{DB: db}
+	fresp, err := fh.Search(context.Background(), &pb.FTSSearchRequest{Query: "tungsten", K: 10, Hydrate: hint})
+	if err != nil {
+		t.Fatalf("fts search: %v", err)
+	}
+	n := nodeHydrated(fresp.Results, 1)
+	if n == nil {
+		t.Fatal("single-chunk node 1 not hydrated")
+	}
+	if len(n.Chunks) != 1 {
+		t.Fatalf("single-chunk node hydrated %d chunks, want 1", len(n.Chunks))
+	}
+	if n.Chunks[0].ChunkId != 1 {
+		t.Errorf("single-chunk node Chunks[0] = %d, want 1", n.Chunks[0].ChunkId)
+	}
+}
+
+// assertMatchedChunkSurfaced asserts the hydrated node INCLUDES the matched chunk and
+// that it is Chunks[0] (so any Chunks[0]-based snippet derivation uses the match).
+func assertMatchedChunkSurfaced(t *testing.T, path string, results []*pb.ScoredNode, nodeID, matchedChunkID int64, matchedText string) {
+	t.Helper()
+	n := nodeHydrated(results, nodeID)
+	if n == nil {
+		t.Fatalf("%s: node %d not present/hydrated in results", path, nodeID)
+	}
+	var found bool
+	for _, c := range n.Chunks {
+		if c.ChunkId == matchedChunkID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("%s: matched chunk %d NOT in hydrated chunks %v — match is invisible", path, matchedChunkID, hydratedChunkIDs(n.Chunks))
+	}
+	if len(n.Chunks) == 0 || n.Chunks[0].ChunkId != matchedChunkID {
+		t.Errorf("%s: Chunks[0] = %v, want matched chunk %d first (so snippet derives from it)", path, firstChunkID(n.Chunks), matchedChunkID)
+	}
+	if len(n.Chunks) > 0 && !strings.Contains(n.Chunks[0].Text, "tungsten") && matchedText != "" {
+		t.Errorf("%s: Chunks[0].Text = %q, want matched chunk text %q", path, n.Chunks[0].Text, matchedText)
+	}
+}
+
+func nodeHydrated(results []*pb.ScoredNode, nodeID int64) *pb.HydratedNode {
+	for _, s := range results {
+		if s.NodeId == nodeID {
+			return s.Hydrated
+		}
+	}
+	return nil
+}
+
+func hydratedChunkIDs(chunks []*pb.HydratedChunk) []int64 {
+	out := make([]int64, len(chunks))
+	for i, c := range chunks {
+		out[i] = c.ChunkId
+	}
+	return out
+}
+
+func firstChunkID(chunks []*pb.HydratedChunk) int64 {
+	if len(chunks) == 0 {
+		return -1
+	}
+	return chunks[0].ChunkId
+}
+
+// tools_firstSnippet mirrors tools.firstSnippet's standard-detail behaviour (use
+// Chunks[0]) for this in-package assertion, since the real firstSnippet lives in the
+// tools package. The fix guarantees Chunks[0] IS the matched chunk.
+func tools_firstSnippet(n *pb.HydratedNode) string {
+	if len(n.Chunks) == 0 {
+		return ""
+	}
+	return n.Chunks[0].Text
 }
 
 func TestGetBlobNotFoundInM1(t *testing.T) {

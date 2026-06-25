@@ -208,6 +208,12 @@ type fusedHit struct {
 	hydrated       *pb.HydratedNode
 	score          float64
 	matchedSources []string
+	// bestRank is the rank (0-based) of the highest-ranked contributing source whose
+	// hydrated node we adopted. FINDING 1: each source pre-hydrates its results with the
+	// MATCHED chunk as Chunks[0], so when a node is matched by multiple sources we keep
+	// the hydrated payload (and thus the snippet) from the source where it ranked best,
+	// rather than whichever the (random-order) map iteration happened to visit first.
+	bestRank int
 }
 
 // rrfFuse implements Reciprocal Rank Fusion with constant k.
@@ -218,13 +224,18 @@ func rrfFuse(lists map[string][]*pb.ScoredNode, k int) []fusedHit {
 		for rank, node := range list {
 			h, ok := scores[node.NodeId]
 			if !ok {
-				h = &fusedHit{nodeID: node.NodeId, hydrated: node.Hydrated}
+				h = &fusedHit{nodeID: node.NodeId, hydrated: node.Hydrated, bestRank: rank}
 				scores[node.NodeId] = h
 			}
 			h.score += 1.0 / float64(k+rank+1)
 			h.matchedSources = append(h.matchedSources, srcName)
-			if h.hydrated == nil && node.Hydrated != nil {
+			// FINDING 1: prefer the hydrated payload (matched-chunk snippet) from the
+			// highest-ranked contributing source. A nil hydrated is always upgraded;
+			// a better-ranked non-nil hydrated replaces a worse-ranked one so the
+			// surfaced snippet reflects the strongest matched chunk for this node.
+			if node.Hydrated != nil && (h.hydrated == nil || rank < h.bestRank) {
 				h.hydrated = node.Hydrated
+				h.bestRank = rank
 			}
 		}
 	}

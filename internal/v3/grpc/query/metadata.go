@@ -78,7 +78,9 @@ LIMIT ?`, strings.Join(conditions, " AND "))
 	}
 
 	if req.Hydrate != nil {
-		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate); err != nil {
+		// Metadata matches on file attributes, not a chunk — no matched chunk_id to
+		// thread, so hydration keeps the M1 Chunks[0] behaviour (nil matchedChunks map).
+		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate, nil); err != nil {
 			return nil, status.Errorf(codes.Internal, "metadata: %v", err)
 		}
 	}
