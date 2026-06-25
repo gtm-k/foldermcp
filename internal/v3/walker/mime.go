@@ -65,12 +65,25 @@ func ClassifyFile(path string) (string, string, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	class := classFromExtOrMime(ext, mime)
 
-	// Content-based override (Q2): only the indexable classes are at risk of
-	// being prose-chunked, and only those carry information worth preserving
-	// for the false case — image/media/data keep their honest labels. Binary
-	// documents are exempt (see doc comment) so they keep their dedicated
-	// 'binary_document_pending_m2' pipeline path.
-	if (class == "code" || (class == "document" && !IsBinaryDocumentExt(path))) && IsBinaryContent(sample) {
+	// Content-based override (Q2 + A5/R3): indexable classes are at risk of
+	// being chunked from garbage, so a binary body downgrades them to 'unknown'.
+	// A5 reroutes structure-aware data files (csv/tsv/json/yaml/xml) into the
+	// runner's chunker WITHOUT a new content_class (the files.content_class CHECK
+	// in 0001 only permits code|document|image|media|data|unknown, and A5 must
+	// not add a migration — A4 owns 0004). They keep content_class 'data'; the
+	// runner consults IsStructuredDataExt to route them instead of skipping.
+	//
+	// R3 (BLOCKING): a data-extension file whose CONTENT is binary (e.g. a .json
+	// that is actually a binary blob) must STILL be skipped — never indexed by
+	// extension alone. So the override downgrades a binary structured-data file
+	// to 'unknown' here (which the runner skips), exactly as it does for code.
+	// Binary documents (.pdf/.docx/.odt) remain exempt (dedicated extractor
+	// path); .sqlite and other 'data' files were already skipped, so they are
+	// unaffected.
+	binaryDowngrade := class == "code" ||
+		(class == "document" && !IsBinaryDocumentExt(path)) ||
+		(class == "data" && IsStructuredDataExt(path))
+	if binaryDowngrade && IsBinaryContent(sample) {
 		class = "unknown"
 	}
 	return mime, class, nil
