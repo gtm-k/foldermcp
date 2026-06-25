@@ -22,6 +22,7 @@ import (
 	"github.com/gtm-k/foldermcp/internal/v3/embed"
 	"github.com/gtm-k/foldermcp/internal/v3/grammar"
 	v3grpc "github.com/gtm-k/foldermcp/internal/v3/grpc"
+	"github.com/gtm-k/foldermcp/internal/v3/grpc/admin"
 	"github.com/gtm-k/foldermcp/internal/v3/pipeline"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
 	"github.com/gtm-k/foldermcp/internal/v3/transport"
@@ -106,7 +107,19 @@ func runV3All(ctx context.Context, workspacePath string) error {
 			queryEmbedder = nil
 		}
 	}
-	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db, Embedder: queryEmbedder})
+	// FIX D: allocate the watch metric object BEFORE building the server so the
+	// SAME pointer is handed to both NewServer (Status reads it) and
+	// NewWatchLoop (the loop writes it). The metric's fields are atomic, so
+	// sharing across the gRPC handler and the watch goroutine is safe. Passed
+	// (and thus surfaced in Status) only in --watch mode; nil otherwise so the
+	// headless/non-watch path does not advertise watch counters.
+	var watchMetric *pipeline.WatchMetrics
+	var watchProvider admin.WatchMetricsProvider
+	if v3AllWatch {
+		watchMetric = &pipeline.WatchMetrics{}
+		watchProvider = watchMetric
+	}
+	srv := v3grpc.NewServer(v3grpc.ServerOpts{DB: db, Embedder: queryEmbedder, Watch: watchProvider})
 
 	// Kick off indexer pipeline in background (D28b.3): walker →
 	// structural → chunker → embeddings via pipeline.Runner.
@@ -134,11 +147,19 @@ func runV3All(ctx context.Context, workspacePath string) error {
 		// --watch (Phase 6): keep the index fresh while the server serves.
 		// Backpressure is built into the loop (one Runner pass at a time), so
 		// the indexer goroutine never spawns unbounded work. The query-side
-		// embedder is a separate instance, so re-index writes never contend
-		// with query reads for the embed lock.
+		// embedder is a separate instance, so re-index writes never contend with
+		// query reads for the EMBED lock.
+		//
+		// CAVEAT (FIX E): store.Open sets SetMaxOpenConns(1), so the gRPC query
+		// path and the watch-loop writer share ONE database connection. Under an
+		// edit storm, queries therefore BLOCK for the duration of each per-file
+		// Runner transaction — they do not run concurrently with re-index writes
+		// at the SQLite layer. Removing that serialization needs a WAL reader pool
+		// (separate read-only connections); that is a tracked architectural
+		// follow-up, not addressed here.
 		if v3AllWatch {
 			cfg := pipeline.WatchConfig{Interval: v3AllWatchInterval}
-			loop := pipeline.NewWatchLoop(db, runner, workspacePath, cfg, nil, nil)
+			loop := pipeline.NewWatchLoop(db, runner, workspacePath, cfg, watchMetric, nil)
 			fmt.Fprintf(os.Stderr, "foldermcp all: watching %s (interval %s)\n", workspacePath, cfg.Interval)
 			if err := loop.Run(ctx); err != nil && ctx.Err() == nil {
 				fmt.Fprintf(os.Stderr, "foldermcp all: watch error: %v\n", err)

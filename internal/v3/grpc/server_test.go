@@ -10,11 +10,66 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gtm-k/foldermcp/internal/v3/grpc/admin"
 	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 	"github.com/gtm-k/foldermcp/internal/v3/store"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// fakeWatchMetrics is a sentinel WatchMetricsProvider so the test can confirm
+// NewServer wires ServerOpts.Watch into the admin handler (FIX D) by observing
+// its values surface in the Status RPC's synthetic passCounts keys.
+type fakeWatchMetrics struct {
+	reconciled int64
+	recoveryAt int64
+}
+
+func (f fakeWatchMetrics) EventsReconciledTotal() int64   { return f.reconciled }
+func (f fakeWatchMetrics) OverflowRecoveryAgeUnix() int64 { return f.recoveryAt }
+
+var _ admin.WatchMetricsProvider = fakeWatchMetrics{}
+
+// TestNewServerWiresWatchProvider asserts the all-v3 watch SLO metrics
+// (events_reconciled_total + watch_overflow_recovery_age_seconds) are surfaced
+// in production: ServerOpts.Watch must reach the admin handler and Status must
+// emit both keys. Without the wiring these keys are absent (D14 dark in prod).
+func TestNewServerWiresWatchProvider(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "w.db"), Tier: store.TierMid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(db, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("watch provider surfaces both keys", func(t *testing.T) {
+		srv := NewServer(ServerOpts{DB: db, Watch: fakeWatchMetrics{reconciled: 7, recoveryAt: 0}})
+		resp, err := srv.Status(context.Background(), &pb.StatusRequest{})
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if got, ok := resp.PassCounts["events_reconciled_total"]; !ok || got != 7 {
+			t.Errorf("events_reconciled_total = %d (present=%v), want 7 — Watch provider not wired into admin handler", got, ok)
+		}
+		if _, ok := resp.PassCounts["watch_overflow_recovery_age_seconds"]; !ok {
+			t.Errorf("watch_overflow_recovery_age_seconds missing — Watch provider not wired")
+		}
+	})
+
+	t.Run("nil watch provider omits the keys", func(t *testing.T) {
+		srv := NewServer(ServerOpts{DB: db}) // headless index-v3 path
+		resp, err := srv.Status(context.Background(), &pb.StatusRequest{})
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if _, ok := resp.PassCounts["events_reconciled_total"]; ok {
+			t.Error("events_reconciled_total present with nil Watch provider — should be omitted")
+		}
+	})
+}
 
 // TestVectorSearchGatedOnIncompatibleIndex pins the central read-side gate:
 // the PUBLIC VectorSearch RPC (and Batch) accept client-supplied int8 codes and

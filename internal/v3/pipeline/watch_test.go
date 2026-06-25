@@ -382,6 +382,186 @@ func TestWatch_ProcessBatchEndToEnd(t *testing.T) {
 	}
 }
 
+// --- FIX A: the watcher must NOT surface walker-excluded paths ---------------
+
+// TestWatch_UpsertSkipsWalkerExcludedPaths asserts that upsertCandidate refuses
+// to insert a files row for any path the walker would never create — paths under
+// .git/, node_modules/, etc., and dotfiles — so the watch path cannot diverge
+// from the walker's write path (phantom rows + garbage embeddings). A normal file
+// in the same batch must still be upserted.
+func TestWatch_UpsertSkipsWalkerExcludedPaths(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	r := newTestRunner(t, db)
+	w := NewWatchLoop(db, r, dir, WatchConfig{}, nil, nil)
+	ctx := context.Background()
+
+	// Excluded: an ignore-dir child, a nested ignore-dir child, and a dotfile.
+	excluded := map[string]string{
+		".git/config":               "[core]\n",
+		"node_modules/pkg/index.js": "module.exports = {}\n",
+		"sub/__pycache__/m.cpython": "bytecode\n",
+		".hidden.md":                "# secret\n",
+	}
+	// Allowed: a normal file (and .env, which the walker's skip rule lets through).
+	allowed := map[string]string{
+		"doc.md": mdFixture,
+		".env":   "KEY=value\n",
+	}
+	for rel, content := range excluded {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+		ok, err := w.upsertCandidate(ctx, p)
+		if err != nil {
+			t.Fatalf("upsertCandidate(%s) returned error: %v", rel, err)
+		}
+		if ok {
+			t.Errorf("upsertCandidate(%s) reported a change for a walker-excluded path", rel)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM files WHERE path=?`, p); got != 0 {
+			t.Errorf("files row created for excluded path %s (count=%d) — diverges from walker", rel, got)
+		}
+	}
+	for rel, content := range allowed {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+		if _, err := w.upsertCandidate(ctx, p); err != nil {
+			t.Fatalf("upsertCandidate(%s) returned error: %v", rel, err)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM files WHERE path=?`, p); got != 1 {
+			t.Errorf("files row NOT created for allowed path %s (count=%d)", rel, got)
+		}
+	}
+}
+
+// TestWatch_WatcherBuiltWithWalkerExcludes asserts the underlying watcher is
+// constructed with the walker's ignore set forwarded as excludes (belt #1), so
+// the poller does not even emit events for those trees.
+func TestWatch_WatcherBuiltWithWalkerExcludes(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWatchLoop(openTestDB(t), newTestRunner(t, openTestDB(t)), dir, WatchConfig{}, nil, nil)
+	got := w.cfg.Excludes
+	// Every ignore-dir name must appear (top-level + nested forms via compileGlobs).
+	for _, name := range []string{".git", "node_modules", "__pycache__", "target", "dist", "build", ".venv", "venv", ".foldermcp"} {
+		found := false
+		for _, g := range got {
+			if g == name+"/**" || g == "**/"+name+"/**" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("watcher excludes missing ignore-dir %q; have %v", name, got)
+		}
+	}
+}
+
+// --- FIX B: reconcile must HARD-PURGE soft-deleted files ---------------------
+
+// TestWatch_ReconcileHardPurgesDroppedDelete simulates a DROPPED delete event:
+// an indexed file is removed from disk but no delete event reaches the loop.
+// reconcile() runs Runner.Run, which soft-deletes (sets deleted_at) but leaves
+// nodes/chunks/embeddings. The in-scope half of the fix is that reconcile then
+// hard-purges those downstream rows — bounding staleness to one reconcile
+// interval — so after reconcile there are ZERO orphaned embeddings for the file.
+func TestWatch_ReconcileHardPurgesDroppedDelete(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{"keep.md": mdFixture, "gone.go": goFixture})
+	r := newTestRunner(t, db)
+	w := NewWatchLoop(db, r, dir, WatchConfig{}, nil, nil)
+	ctx := context.Background()
+	if err := r.Run(ctx, dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	goneID := fileIDByPathSuffix(t, db, "gone.go")
+	embGone := count(t, db, `SELECT COUNT(*) FROM embeddings WHERE chunk_id IN (
+  SELECT chunk_id FROM chunks WHERE node_id IN (SELECT node_id FROM nodes WHERE file_id=?))`, goneID)
+	if embGone == 0 {
+		t.Fatal("gone.go had no embeddings")
+	}
+
+	// Drop the file from disk; NO delete event is accumulated (dropped event).
+	if err := os.Remove(filepath.Join(dir, "gone.go")); err != nil {
+		t.Fatalf("remove gone.go: %v", err)
+	}
+	// Backdate last_seen so the Runner's deletion reconciliation
+	// (last_seen < startTime) deterministically flags gone.go deleted_at on the
+	// next Run — the initial Run and this reconcile would otherwise share the
+	// same wall-clock second (Runner uses unix-second granularity), masking the
+	// soft-delete the hard-purge is meant to clean up.
+	if _, err := db.ExecContext(ctx, `UPDATE files SET last_seen=last_seen-3600 WHERE file_id=?`, goneID); err != nil {
+		t.Fatalf("backdate last_seen: %v", err)
+	}
+
+	if err := w.reconcile(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	// Precondition the fix relies on: Runner.Run soft-deleted gone.go.
+	if got := count(t, db, `SELECT COUNT(*) FROM files WHERE file_id=? AND deleted_at IS NOT NULL`, goneID); got != 1 &&
+		count(t, db, `SELECT COUNT(*) FROM files WHERE file_id=?`, goneID) != 0 {
+		t.Fatalf("gone.go was neither soft-deleted nor purged (deleted-flag=%d) — Runner deletion reconciliation precondition not met", got)
+	}
+
+	// The file row may remain flagged deleted_at OR be gone, but its downstream
+	// rows (nodes/chunks/embeddings) MUST be purged: zero orphaned embeddings and
+	// no nodes for the file.
+	if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=?`, goneID); got != 0 {
+		t.Errorf("nodes for soft-deleted gone.go = %d, want 0 after reconcile hard-purge", got)
+	}
+	if got := orphanEmbeddings(t, w); got != 0 {
+		t.Errorf("orphaned embeddings = %d, want 0 after reconcile hard-purge", got)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM embeddings WHERE chunk_id IN (
+  SELECT chunk_id FROM chunks WHERE node_id IN (SELECT node_id FROM nodes WHERE file_id=?))`, goneID); got != 0 {
+		t.Errorf("embeddings still mapped to gone.go = %d, want 0", got)
+	}
+	// keep.md still indexed.
+	if got := count(t, db, `SELECT COUNT(*) FROM files WHERE path LIKE '%keep.md' AND deleted_at IS NULL`); got != 1 {
+		t.Errorf("keep.md missing/deleted after reconcile: %d", got)
+	}
+}
+
+// --- FIX C: reconcile recovery metric must not count normal live updates -----
+
+// TestWatch_ReconcileDoesNotCountPendingLiveEvent delivers a NORMAL live event
+// (its path is in the dedup set) and then fires reconcile BEFORE the debounce
+// processes it. The reconcile's Runner.Run will index the file, but because the
+// file had a pending live event it is NOT a dropped-event recovery, so
+// events_reconciled_total must stay 0.
+func TestWatch_ReconcileDoesNotCountPendingLiveEvent(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{"seen.md": mdFixture})
+	r := newTestRunner(t, db)
+	w := NewWatchLoop(db, r, dir, WatchConfig{}, nil, nil)
+	ctx := context.Background()
+	if err := r.Run(ctx, dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// A new file appears AND its live event is delivered normally (pending set).
+	live := filepath.Join(dir, "live.md")
+	if err := os.WriteFile(live, []byte("# Live\n\nA normally-delivered live event for reconcile de-pollution.\n"), 0o644); err != nil {
+		t.Fatalf("write live: %v", err)
+	}
+	w.accumulate(watcher.Event{Path: live, Type: "created"})
+
+	// reconcile fires before processBatch drains the pending event.
+	if err := w.reconcile(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if got := w.Metrics().EventsReconciledTotal(); got != 0 {
+		t.Errorf("events_reconciled_total = %d after a normally-delivered live event, want 0 (no false-positive recovery)", got)
+	}
+}
+
 // --- concurrency smoke: drain + run loop under -race (no live model) ---------
 
 // TestWatch_RunLoopShutsDownCleanly starts the full Run loop with a fake

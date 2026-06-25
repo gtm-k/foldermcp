@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -137,8 +138,15 @@ type watcherIface interface {
 // disk. It owns NONE of the Runner's write path: every re-index goes through
 // Runner.Run (D9 — events are candidates, not commands; the sha256 trigger
 // short-circuits mtime-only churn), so the watch loop inherits the Runner's
-// zero-chunk-done guards and transactional per-file atomicity rather than
-// forking a divergent write path.
+// transactional per-file atomicity and the zero-chunk-done guards on the
+// extracted-document and structured-data paths rather than forking a divergent
+// write path.
+//
+// CAVEAT (FIX E): the Runner's PLAIN-TEXT path (runChunker → ChunkProse) does
+// NOT guard zero chunks, so an emptied .go/.md re-indexed via watch is still
+// marked done-with-zero-chunks. That guard lives in runner.go (off-limits this
+// round) and is a tracked integration-pass follow-up — the invariant is systemic
+// (flagged across A4/A5/A6), not specific to the watch loop.
 type WatchLoop struct {
 	db     *sql.DB
 	runner *Runner
@@ -168,6 +176,13 @@ func NewWatchLoop(db *sql.DB, runner *Runner, root string, cfg WatchConfig, metr
 	if logger == nil {
 		logger = slog.Default()
 	}
+	// FIX A (belt #1): forward the walker's ignore set to the watcher so the
+	// poller does not even EMIT events for trees the walker hard-excludes
+	// (.git/, node_modules/, build dirs, …). The authoritative guard is the
+	// per-path skip check in upsertCandidate (belt #2) — the poller's glob
+	// filter is best-effort because watcher.matchesFilter globs the full
+	// relative path and cannot express the walker's "dotfile basename" rule.
+	cfg.Excludes = mergeExcludes(cfg.Excludes, walkerIgnoreExcludeGlobs())
 	w := &WatchLoop{
 		db:      db,
 		runner:  runner,
@@ -181,6 +196,81 @@ func NewWatchLoop(db *sql.DB, runner *Runner, root string, cfg WatchConfig, metr
 		return watcher.New(root, cfg.interval(), cfg.Includes, cfg.Excludes)
 	}
 	return w
+}
+
+// walkerIgnoreDirs is the directory-name ignore set the walker prunes
+// (walker.shouldIgnoreDir). REPLICATED here (read-only) rather than imported,
+// because walker.go is owned by a parallel phase this round and exposes no
+// exported predicate. See newDecision: a shared EXPORTED walker.ShouldSkip
+// predicate is the consolidation follow-up so this duplication is removed.
+var walkerIgnoreDirs = map[string]bool{
+	".git": true, ".foldermcp": true, "node_modules": true, "__pycache__": true,
+	".venv": true, "venv": true, "target": true, "dist": true, "build": true,
+}
+
+// walkerIgnoreExcludeGlobs renders the walker's ignore-dir set as watcher
+// exclude globs. compileGlobs auto-derives the top-level form (name/**) from the
+// "**/" prefix, so a single "**/<name>/**" pattern covers both nested and
+// root-level occurrences. Dotfiles are intentionally NOT globbed here (the glob
+// path cannot honour the .env exception); upsertCandidate's skip check does.
+func walkerIgnoreExcludeGlobs() []string {
+	out := make([]string, 0, len(walkerIgnoreDirs))
+	for name := range walkerIgnoreDirs {
+		out = append(out, "**/"+name+"/**")
+	}
+	return out
+}
+
+// mergeExcludes appends extra patterns not already present in base.
+func mergeExcludes(base, extra []string) []string {
+	seen := make(map[string]bool, len(base))
+	for _, p := range base {
+		seen[p] = true
+	}
+	out := base
+	for _, p := range extra {
+		if !seen[p] {
+			out = append(out, p)
+			seen[p] = true
+		}
+	}
+	return out
+}
+
+// walkerWouldSkip replicates walker.shouldIgnoreDir + walker.skipFile for ONE
+// path under root (read-only; walker.go is off-limits this round). It returns
+// true when the walker would never create a files row for path, so the watch
+// loop must not either. Logic mirror:
+//   - any DIRECTORY segment of path (relative to root) whose name is in the
+//     ignore-dir set ⇒ skipped (walker prunes the subtree with SkipDir);
+//   - the FILENAME starts with '.' and is not ".env" ⇒ skipped (walker.skipFile's
+//     dotfile rule). The walker's user IgnoreGlobs are NOT replicated (the watch
+//     loop has no IgnoreGlobs source; the dir + dotfile rules are the divergence
+//     that produced phantom rows).
+//
+// A path outside root (filepath.Rel fails or escapes) is treated as skip — the
+// watch loop only owns paths under its root.
+func walkerWouldSkip(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return true
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." || strings.HasPrefix(rel, "../") || rel == ".." {
+		return true
+	}
+	segs := strings.Split(rel, "/")
+	// All segments except the last are directory components.
+	for _, dir := range segs[:len(segs)-1] {
+		if walkerIgnoreDirs[dir] {
+			return true
+		}
+	}
+	base := segs[len(segs)-1]
+	if strings.HasPrefix(base, ".") && base != ".env" {
+		return true
+	}
+	return false
 }
 
 // Metrics returns the loop's metric registry (the one passed in, or the private
@@ -370,6 +460,14 @@ func (w *WatchLoop) processBatch(ctx context.Context) error {
 // whether the row's content actually changed (sha256 differs from the stored
 // row), which is what the storm test asserts.
 func (w *WatchLoop) upsertCandidate(ctx context.Context, path string) (bool, error) {
+	// FIX A (belt #2, authoritative): never insert a files row the walker would
+	// not. The watcher's glob filter (belt #1) is coarse; this per-path check is
+	// the exact mirror of walker.shouldIgnoreDir + walker.skipFile, so the watch
+	// write path cannot diverge from the walker's (phantom pending rows + garbage
+	// embeddings). No hash/classify/stat work happens for a skipped path.
+	if walkerWouldSkip(w.root, path) {
+		return false, nil
+	}
 	sum, err := walker.HashFile(path)
 	if err != nil {
 		// File vanished between event and re-hash, or unreadable. Treat a
@@ -477,9 +575,25 @@ func deleteFileRowsTx(ctx context.Context, tx *sql.Tx, fileID int64) error {
 // Runs each file's purge in its own transaction so one failure does not abort
 // the whole sweep.
 func (w *WatchLoop) startupSweep(ctx context.Context) error {
+	return w.purgeSoftDeleted(ctx)
+}
+
+// purgeSoftDeleted hard-purges the downstream rows (nodes/chunks/embeddings/
+// pipeline_state) of every file flagged deleted_at but not yet purged. Shared by
+// startupSweep and reconcile (FIX B): Runner.Run only SOFT-deletes (sets
+// deleted_at) for files gone from disk, leaving their vectors searchable until a
+// purge runs. Calling this after EACH reconcile bounds that staleness window to
+// one reconcile interval instead of one daemon restart. Each file's purge runs
+// in its own transaction so one failure does not abort the sweep.
+//
+// NOTE (deferred, off-limits this round): the IMMEDIATE half — hydrateNodes
+// honouring f.deleted_at so a soft-deleted file is excluded from query results
+// the instant Runner.Run flags it (before this purge) — lives in
+// grpc/query/hydrate.go and is a tracked integration-pass follow-up.
+func (w *WatchLoop) purgeSoftDeleted(ctx context.Context) error {
 	rows, err := w.db.QueryContext(ctx, `SELECT file_id FROM files WHERE deleted_at IS NOT NULL`)
 	if err != nil {
-		return fmt.Errorf("startup sweep query: %w", err)
+		return fmt.Errorf("purge soft-deleted query: %w", err)
 	}
 	var ids []int64
 	for rows.Next() {
@@ -501,7 +615,7 @@ func (w *WatchLoop) startupSweep(ctx context.Context) error {
 			return err
 		}
 		if err := w.purgeFileID(ctx, id); err != nil {
-			w.logger.Warn("watch: startup sweep purge failed", "file_id", id, "error", err)
+			w.logger.Warn("watch: soft-deleted purge failed", "file_id", id, "error", err)
 		}
 	}
 	return nil
@@ -547,13 +661,45 @@ func (w *WatchLoop) reconcile(ctx context.Context) error {
 		w.logger.Warn("watch: pre-reconcile done-set snapshot failed", "error", err)
 	}
 
+	// FIX C: snapshot the paths that have a PENDING live event right now. A file
+	// whose event WAS delivered (it sits in the dedup set) and is merely processed
+	// by this reconcile's Run because the reconcile ticker beat the debounce
+	// ticker is NOT a dropped-event recovery — counting it would raise a
+	// false-positive SLO signal on normal operation. Such paths are excluded from
+	// the recovered set below.
+	livePending := w.pendingPaths()
+
 	if err := w.runner.Run(ctx, w.root); err != nil {
 		return err
 	}
 
-	recovered, oldestMtime := w.recoveredSince(ctx, preDone)
+	recovered, oldestMtime := w.recoveredSince(ctx, preDone, livePending)
 	w.metric.recordReconciledFiles(recovered, oldestMtime)
+
+	// FIX B: Runner.Run only SOFT-deletes files gone from disk (sets deleted_at).
+	// Hard-purge their downstream rows now so a dropped DELETE event's stale
+	// vectors are bounded to one reconcile interval rather than one daemon
+	// restart. Best-effort: a purge error is logged inside, not fatal.
+	if err := w.purgeSoftDeleted(ctx); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		w.logger.Warn("watch: reconcile soft-deleted purge failed", "error", err)
+	}
 	return nil
+}
+
+// pendingPaths returns a snapshot of the paths currently in the dedup set
+// (test/observability helper; used by reconcile to de-pollute the recovery
+// metric — a path with a live event is not a dropped-event recovery).
+func (w *WatchLoop) pendingPaths() map[string]bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make(map[string]bool, len(w.pending))
+	for p := range w.pending {
+		out[p] = true
+	}
+	return out
 }
 
 // doneEmbeddingIDs returns the set of file_ids currently at embeddings=done.
@@ -576,11 +722,13 @@ SELECT file_id FROM pipeline_state WHERE pass_name='embeddings' AND status='done
 }
 
 // recoveredSince counts file_ids now at embeddings=done that were NOT in the
-// pre-run done set, and returns the oldest mtime among them (for the overflow
-// watermark). A file already done before the run is not a recovery.
-func (w *WatchLoop) recoveredSince(ctx context.Context, preDone map[int64]bool) (int, int64) {
+// pre-run done set AND did NOT have a pending live event (livePending, by path),
+// and returns the oldest mtime among them (for the overflow watermark). A file
+// already done before the run is not a recovery; a file whose live event was
+// delivered and merely processed by this sweep (FIX C) is not a recovery either.
+func (w *WatchLoop) recoveredSince(ctx context.Context, preDone map[int64]bool, livePending map[string]bool) (int, int64) {
 	rows, err := w.db.QueryContext(ctx, `
-SELECT ps.file_id, f.mtime
+SELECT ps.file_id, f.mtime, f.path
 FROM pipeline_state ps
 JOIN files f ON f.file_id = ps.file_id
 WHERE ps.pass_name='embeddings' AND ps.status='done' AND f.deleted_at IS NULL`)
@@ -593,12 +741,16 @@ WHERE ps.pass_name='embeddings' AND ps.status='done' AND f.deleted_at IS NULL`)
 	var oldest int64
 	for rows.Next() {
 		var id, mtime int64
-		if err := rows.Scan(&id, &mtime); err != nil {
+		var path string
+		if err := rows.Scan(&id, &mtime, &path); err != nil {
 			w.logger.Warn("watch: recovered-set scan failed", "error", err)
 			return n, oldest
 		}
 		if preDone[id] {
 			continue // already done before this sweep — not a recovery
+		}
+		if livePending[path] {
+			continue // FIX C: live event was delivered — not a dropped-event recovery
 		}
 		n++
 		if oldest == 0 || mtime < oldest {
