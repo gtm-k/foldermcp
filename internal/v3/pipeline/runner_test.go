@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -104,6 +105,15 @@ func seedDir(t *testing.T, files map[string]string) string {
 		}
 	}
 	return dir
+}
+
+// writeFile writes raw bytes (e.g. a real PDF/docx/odt fixture) into dir under
+// name — the binary counterpart to seedDir's string map.
+func writeFile(t *testing.T, dir, name string, content []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+		t.Fatalf("write fixture %s: %v", name, err)
+	}
 }
 
 func openTestDB(t *testing.T) *sql.DB {
@@ -538,46 +548,254 @@ func TestRunner_PolicyDriftGuard(t *testing.T) {
 	}
 }
 
-// TestRunner_BinaryDocumentSkipped (D28b-E2 follow-up D): content_class
-// 'document' covers binary formats (.pdf/.docx/.odt) that M1 cannot
-// extract text from — routing their raw bytes through the prose chunker
-// produces garbage chunks. They must be marked skipped with the
-// 'binary_document_pending_m2' marker (M2 Phase 4 replaces this with
-// real PDF extraction); plain-text documents (.md/.txt/...) still chunk.
-func TestRunner_BinaryDocumentSkipped(t *testing.T) {
+// TestRunner_BinaryDocumentsExtracted (A4): content_class 'document' covers
+// binary formats (.pdf/.docx/.odt) that the M2 extractors now turn into text.
+// They must be EXTRACTED and chunked (pdf_text / office_text), NOT skipped.
+//
+// R2 (blocking): the .docx/.odt fixtures are REAL ZIP containers built via
+// chunker.BuildDOCX/BuildODT, so they carry NUL bytes in their first 8 KB — the
+// exact condition that previously reclassified a document to 'unknown'. This
+// test proves they are still classified 'document', routed to extraction, and
+// never reach the binary-skip path or the prose chunker.
+func TestRunner_BinaryDocumentsExtracted(t *testing.T) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext not on PATH; skipping (gate runs in WSL where it is installed)")
+	}
 	db := openTestDB(t)
-	dir := seedDir(t, map[string]string{
-		// A representative PDF: contains NUL bytes in its header region, like
-		// every real compressed PDF. This must STILL get the document path's
-		// 'binary_document_pending_m2' marker — the walker's content-binary
-		// override exempts binary-document extensions precisely so the NUL here
-		// does not reclassify it to 'unknown' and strip the marker.
-		"report.pdf": "%PDF-1.4\n\xe2\xe3\xcf\xd3\x00\x01\x02 binary garbage bytes that must never reach the prose chunker",
-		"notes.md":   mdFixture,
-	})
-	r := newTestRunner(t, db)
+	dir := t.TempDir()
 
+	// Real multi-page PDF fixture (committed under testdata/v3/pdf).
+	pdfBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "v3", "pdf", "multi_page.pdf"))
+	if err != nil {
+		t.Fatalf("read pdf fixture: %v", err)
+	}
+	// F5 (R2 BLOCKING): the PDF fixture MUST carry a NUL within its first 8 KB the
+	// way real PDFs do — otherwise walker.IsBinaryContent(sample)==false and the
+	// "stays content_class=document" assertion below passes WHETHER OR NOT the
+	// .pdf exemption exists (a vacuous test — the Q2-retro masking failure). Fail
+	// loudly here if a future regen drops the NUL, so the PDF half of the
+	// exemption is genuinely exercised.
+	sniff := pdfBytes
+	if len(sniff) > 8192 {
+		sniff = sniff[:8192]
+	}
+	if !bytes.Contains(sniff, []byte{0x00}) {
+		t.Fatalf("PDF fixture has no NUL in its first 8192 bytes — the binary-exemption assertion would be vacuous (F5/R2). Regenerate multi_page.pdf with a NUL-bearing binary comment.")
+	}
+	if !walker.IsBinaryContent(sniff) {
+		t.Fatalf("walker.IsBinaryContent(pdf sample)==false — the .pdf exemption is not being exercised (F5/R2)")
+	}
+	writeFile(t, dir, "report.pdf", pdfBytes)
+
+	// Real docx + odt fixtures (NUL-bearing ZIP containers, R2).
+	docx, err := chunker.BuildDOCX([]string{
+		"This is the office docx body for the runner extraction test.",
+		"It mentions tungsten alloy as a unique probe phrase for retrieval.",
+	})
+	if err != nil {
+		t.Fatalf("BuildDOCX: %v", err)
+	}
+	writeFile(t, dir, "memo.docx", docx)
+	odt, err := chunker.BuildODT([]string{
+		"This is the odt content body for the runner extraction test.",
+		"It mentions cobalt isotope as a unique probe phrase for retrieval.",
+	})
+	if err != nil {
+		t.Fatalf("BuildODT: %v", err)
+	}
+	writeFile(t, dir, "report.odt", odt)
+	writeFile(t, dir, "notes.md", []byte(mdFixture))
+
+	r := newTestRunner(t, db)
 	if err := r.Run(context.Background(), dir); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	pdfID := fileIDByPathSuffix(t, db, "report.pdf")
-	for _, pass := range []string{"structural", "chunker", "embeddings"} {
-		var status, msg string
-		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, pdfID, pass).Scan(&status, &msg); err != nil {
-			t.Fatalf("read %s row: %v", pass, err)
+	cases := []struct {
+		name string
+		kind string
+	}{
+		{"report.pdf", "pdf_text"},
+		{"memo.docx", "office_text"},
+		{"report.odt", "office_text"},
+	}
+	for _, tc := range cases {
+		id := fileIDByPathSuffix(t, db, tc.name)
+		// R2: the file is classified 'document' (not downgraded to unknown by
+		// its NUL bytes), so all three passes complete done — never skipped.
+		for _, pass := range []string{"structural", "chunker", "embeddings"} {
+			var status, msg string
+			if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, id, pass).Scan(&status, &msg); err != nil {
+				t.Fatalf("%s %s row: %v", tc.name, pass, err)
+			}
+			if status != "done" {
+				t.Errorf("%s %s = (%q, %q), want done", tc.name, pass, status, msg)
+			}
 		}
-		if status != "skipped" || msg != "binary_document_pending_m2" {
-			t.Errorf("%s = (%q, %q), want (skipped, binary_document_pending_m2)", pass, status, msg)
+		var cc string
+		if err := db.QueryRow(`SELECT content_class FROM files WHERE file_id=?`, id).Scan(&cc); err != nil {
+			t.Fatalf("%s content_class: %v", tc.name, err)
+		}
+		if cc != "document" {
+			t.Errorf("%s content_class = %q, want document (R2 — NUL bytes must not reclassify)", tc.name, cc)
+		}
+		chunks := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=? AND c.chunk_kind=?`, id, tc.kind)
+		if chunks == 0 {
+			t.Errorf("%s produced no %s chunks", tc.name, tc.kind)
+		}
+		embeddings := count(t, db, `SELECT COUNT(*) FROM embeddings e JOIN chunks c ON e.chunk_id=c.chunk_id JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, id)
+		if embeddings != chunks {
+			t.Errorf("%s embeddings=%d chunks=%d, want equal", tc.name, embeddings, chunks)
 		}
 	}
-	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id = n.node_id WHERE n.file_id=?`, pdfID); got != 0 {
-		t.Errorf("binary document produced %d garbage chunks", got)
+
+	// FTS hit on a probe phrase that only exists inside an extracted office doc.
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'tungsten'`); got == 0 {
+		t.Error("no FTS hit for docx-only probe phrase 'tungsten' — extraction did not index")
 	}
-	// The plain-text document still completes the full pipeline.
+
+	// The plain-text document still completes the full pipeline as prose.
 	mdID := fileIDByPathSuffix(t, db, "notes.md")
 	if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, mdID); got != 1 {
 		t.Errorf("notes.md embeddings done = %d, want 1", got)
+	}
+}
+
+// TestRunner_PDFMissingDependency (A4 AC): with pdftotext unresolvable, a PDF is
+// marked failed with error_message='dependency:pdftotext' and the indexer still
+// exits 0 (per-file failure, not fatal).
+func TestRunner_PDFMissingDependency(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	pdfBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "v3", "pdf", "multi_page.pdf"))
+	if err != nil {
+		t.Fatalf("read pdf fixture: %v", err)
+	}
+	writeFile(t, dir, "report.pdf", pdfBytes)
+
+	r := newTestRunner(t, db)
+	// Force pdftotext resolution to fail regardless of the host PATH.
+	r.PDFCfg = chunker.PDFConfig{PdftotextPath: filepath.Join(t.TempDir(), "no_such_pdftotext")}
+
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run returned fatal error (want exit 0 / nil): %v", err)
+	}
+
+	pdfID := fileIDByPathSuffix(t, db, "report.pdf")
+	var status, msg string
+	if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name='chunker'`, pdfID).Scan(&status, &msg); err != nil {
+		t.Fatalf("read chunker row: %v", err)
+	}
+	if status != "failed" || msg != "dependency:pdftotext" {
+		t.Errorf("chunker = (%q, %q), want (failed, dependency:pdftotext)", status, msg)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, pdfID); got != 0 {
+		t.Errorf("failed PDF produced %d chunks, want 0 (transaction rolled back)", got)
+	}
+}
+
+// TestRunner_EmptyExtractionFailsObservably (F1): a binary-document extraction
+// that yields ZERO chunks must land status=FAILED with error_message=
+// "extraction_empty" — NOT done-with-zero-chunks (which would count the file
+// indexed, drop it from PendingFiles forever, and leave it silently
+// unsearchable). Two paths: a valid PDF whose pdftotext output is only a
+// form-feed (empty_text.pdf), and a docx with no paragraphs (text-empty office).
+func TestRunner_EmptyExtractionFailsObservably(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+
+	// Empty-text PDF (pdftotext output = "\f"); needs pdftotext.
+	havePdftotext := false
+	if _, err := exec.LookPath("pdftotext"); err == nil {
+		havePdftotext = true
+		pdfBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "v3", "pdf", "empty_text.pdf"))
+		if err != nil {
+			t.Fatalf("read empty pdf fixture: %v", err)
+		}
+		writeFile(t, dir, "blank.pdf", pdfBytes)
+	}
+
+	// Text-empty docx: no paragraphs → zero extracted chunks. No pdftotext needed.
+	emptyDocx, err := chunker.BuildDOCX(nil)
+	if err != nil {
+		t.Fatalf("BuildDOCX(nil): %v", err)
+	}
+	writeFile(t, dir, "empty.docx", emptyDocx)
+
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	check := func(name string) {
+		id := fileIDByPathSuffix(t, db, name)
+		var status, msg string
+		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name='chunker'`, id).Scan(&status, &msg); err != nil {
+			t.Fatalf("%s chunker row: %v", name, err)
+		}
+		if status != "failed" || msg != "extraction_empty" {
+			t.Errorf("%s chunker = (%q, %q), want (failed, extraction_empty)", name, status, msg)
+		}
+		// The transaction rolled back: no node/chunk persisted, and the file is NOT
+		// marked done (so it stays a pending retry, not silently indexed-empty).
+		if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=?`, id); got != 0 {
+			t.Errorf("%s left %d nodes — tx should have rolled back", name, got)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, id); got != 0 {
+			t.Errorf("%s embeddings marked done despite zero chunks (silent index-empty)", name)
+		}
+	}
+	if havePdftotext {
+		check("blank.pdf")
+	}
+	check("empty.docx")
+}
+
+// TestRunner_DocumentOversizeFailsWithBareMarker (re-review FIX 1/5a): a binary
+// document whose on-disk size exceeds maxDocumentBytes must land status=FAILED
+// with error_message EXACTLY "document_oversize" (the bare sentinel) — no
+// interpolated byte count — so the end-of-run histogram (which buckets on
+// substr(error_message,1,80)) groups every oversize document into ONE bucket
+// rather than one bucket per distinct size. A sparse file gives the walker a
+// >cap stat size without writing 64 MB to disk; the .docx PK magic + extension
+// route it to runExtractedDocument, where the size cap rejects it before any
+// extractor opens it.
+func TestRunner_DocumentOversizeFailsWithBareMarker(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+
+	path := filepath.Join(dir, "huge.docx")
+	fh, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Real ZIP local-file-header magic so content classification routes it as a
+	// binary document (not skipped as unknown), then a sparse hole out to >cap.
+	if _, err := fh.Write([]byte("PK\x03\x04")); err != nil {
+		t.Fatalf("write magic: %v", err)
+	}
+	if err := fh.Truncate(maxDocumentBytes + 1); err != nil {
+		t.Fatalf("truncate sparse: %v", err)
+	}
+	if err := fh.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run returned fatal error (want exit 0 / nil): %v", err)
+	}
+
+	id := fileIDByPathSuffix(t, db, "huge.docx")
+	var status, msg string
+	if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name='chunker'`, id).Scan(&status, &msg); err != nil {
+		t.Fatalf("read chunker row: %v", err)
+	}
+	if status != "failed" || msg != "document_oversize" {
+		t.Errorf("chunker = (%q, %q), want (failed, document_oversize) EXACTLY — bare marker, no byte count", status, msg)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=?`, id); got != 0 {
+		t.Errorf("oversize doc left %d nodes — must be rejected before any DB write", got)
 	}
 }
 

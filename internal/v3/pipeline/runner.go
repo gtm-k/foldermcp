@@ -40,6 +40,15 @@ const (
 	// memory and dominate the 1-TB budget (pre-mortem Story 2 includes a
 	// 40 MB generated .py file as a failure class).
 	maxReadBytes = 32 * 1024 * 1024 // 32 MB — covers ~99% of real code/prose
+	// maxDocumentBytes caps the on-disk size of a binary document (.pdf/.docx/.odt)
+	// before any extractor touches it (F3). Routing dispatches binary documents
+	// BEFORE readFileContent, so the text path's maxReadBytes never applies to
+	// them — a multi-GB PDF would otherwise be handed straight to poppler, and a
+	// huge ZIP straight to archive/zip. 64 MB is 2x the 32 MB source-text cap (a
+	// compressed container legitimately holds more bytes-on-disk per byte-of-text
+	// than a flat text file, so a slightly higher cap than maxReadBytes is
+	// defensible) while still bounding the input an extractor sees.
+	maxDocumentBytes = 64 * 1024 * 1024
 )
 
 // Runner orchestrates the four-pass pipeline (walker → structural →
@@ -52,8 +61,9 @@ type Runner struct {
 	Extractors map[string]grammar.Extractor
 	Counter    chunker.Counter
 	Cfg        chunker.Config
-	BatchSize  int          // embed batch size; default 32
-	Logger     *slog.Logger // default slog.Default()
+	PDFCfg     chunker.PDFConfig // pdftotext binary override (A4); zero value = PATH lookup
+	BatchSize  int               // embed batch size; default 32
+	Logger     *slog.Logger      // default slog.Default()
 
 	// currentPass tracks which pass the in-flight file is in so failures
 	// (including panics) are attributed to the right pipeline_state row.
@@ -127,6 +137,14 @@ func (r *Runner) Run(ctx context.Context, root string) error {
 	}
 	if err := r.Embedder.Init(); err != nil {
 		return fmt.Errorf("runner init: embedder: %w", err)
+	}
+
+	// A4 / D8: emit a SINGLE startup WARN if pdftotext is absent rather than one
+	// per PDF. PDFs still flow through the pipeline and are marked failed with
+	// error_message='dependency:pdftotext' (visible in index-v3 status); this
+	// just surfaces the missing dependency once, up front.
+	if !chunker.PdftotextAvailable(r.PDFCfg) {
+		logger.Warn("runner: pdftotext not found on PATH — PDF files will be marked failed (dependency:pdftotext); install poppler-utils to index PDFs")
 	}
 
 	// Step 5: main loop over PendingFiles(PassEmbeddings) — the terminal
@@ -259,24 +277,18 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 		return nil
 	}
 
-	// Binary documents (D28b-E2 follow-up): content_class 'document'
-	// includes .pdf/.docx/.odt, whose raw bytes M1 cannot extract text
-	// from — routing them through the prose chunker produces garbage
-	// chunks. Skip with a grep-able marker; M2 Phase 4 replaces this
-	// with real PDF extraction. Plain-text documents (.md/.txt/.rst/...)
-	// fall through to prose chunking as before.
-	// M2 follow-up (E2 review finding 4): 'skipped' is not terminal in
-	// PendingFiles, so these files are re-walked through the defensive
-	// DELETEs + status upserts on every Run — negligible at fixture
-	// scale, linear in binary-doc count on a 1-TB workspace. Treat
-	// 'skipped' as terminal in the selector when M2 lands extraction.
+	// Binary documents (A4): content_class 'document' includes .pdf/.docx/.odt,
+	// ZIP/PDF containers whose raw bytes are NOT text. They are routed to a
+	// dedicated extractor (pdftotext for PDF, archive/zip+XML for office) rather
+	// than the prose chunker. This branch is load-bearing for R2: it dispatches
+	// BEFORE readFileContent + IsBinaryContent, so the NUL bytes every real
+	// PDF/docx/odt carries never reach the binary-skip path that would otherwise
+	// strip these files from indexing. The classifier (walker) exempts these
+	// extensions from its content-binary downgrade for the same reason, so the
+	// extension predicate and the runner agree (single source of truth in
+	// walker.IsBinaryDocumentExt).
 	if f.ContentClass == "document" && walker.IsBinaryDocumentExt(f.Path) {
-		for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
-			if err = markStatusTx(ctx, tx, f.ID, p, StatusSkipped, "binary_document_pending_m2"); err != nil {
-				return err
-			}
-		}
-		return nil
+		return r.runExtractedDocument(ctx, tx, f)
 	}
 
 	r.currentPass = PassStructural
@@ -334,6 +346,197 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 		return err
 	}
 	return nil
+}
+
+// errDocumentOversize marks a binary document rejected by the file-size cap
+// (F3) before any extractor runs. Its bare string is the grep-able marker
+// 'document_oversize' surfaced in the end-of-run failure histogram.
+var errDocumentOversize = errors.New("document_oversize")
+
+// runExtractedDocument handles a binary document (.pdf/.docx/.odt) through the
+// same per-file pass lifecycle as text files, but the text comes from a
+// dedicated extractor instead of readFileContent (A4). Structural pass creates a
+// single 'file' node whose properties JSON carries the extraction stats (D18);
+// chunker pass inserts the extractor's chunks with chunk_kind 'pdf_text' (PDF)
+// or 'office_text' (docx/odt); embeddings pass embeds them.
+//
+// Extraction failures are returned (not swallowed): the caller's deferred
+// rollback discards the partial transaction and processOneFile records the
+// failure under the current pass with the error's verbatim message. The
+// chunker's sentinel errors stringify to exactly the bare markers the plan
+// requires — chunker.ErrDependencyMissing → "dependency:pdftotext",
+// chunker.ErrExtractionQuality → "extraction_quality", chunker.ErrExtractionEmpty
+// → "extraction_empty", chunker.ErrExtractionTimeout → "extraction_timeout",
+// chunker.ErrExtractionOversize → "extraction_oversize", chunker.ErrTooManyChunks
+// → "too_many_chunks", and errDocumentOversize → "document_oversize".
+//
+// Observability (F7): `index-v3 status` buckets failures by pass_name only
+// (e.g. chunker_failed=N), NOT by error_message — so these markers are NOT
+// visible there as distinct buckets. They surface via the END-OF-RUN run-summary
+// log (logSummary's top-3 error-prefix histogram), which groups
+// pipeline_state.error_message prefixes. That is the observable channel for
+// distinguishing dependency:pdftotext / extraction_quality / extraction_empty /
+// extraction_timeout / extraction_oversize / too_many_chunks / document_oversize.
+// Adding a proto field to surface them in status is deliberately out of scope.
+func (r *Runner) runExtractedDocument(ctx context.Context, tx *sql.Tx, f fileRow) error {
+	title := filepath.Base(f.Path)
+	ext := strings.ToLower(filepath.Ext(f.Path))
+
+	// Input file-size cap (F3a): routing reaches here BEFORE readFileContent, so
+	// the text path's maxReadBytes never guarded these files. Reject an oversize
+	// document before invoking any extractor (poppler/archive/zip), attributing
+	// it to the chunker pass with the bare 'document_oversize' marker.
+	if f.Size > maxDocumentBytes {
+		r.currentPass = PassChunker
+		// Return the BARE sentinel so pipeline_state.error_message is exactly
+		// "document_oversize" — the end-of-run histogram buckets on
+		// substr(error_message,1,80), so an interpolated byte count would put
+		// every oversize document of a different size in its own bucket. Surface
+		// the size detail via a WARN instead so the diagnostic is not lost. Mirrors
+		// how the chunker sentinels are returned bare.
+		r.logger().Warn("runner: document oversize", "file_id", f.ID, "size", f.Size, "cap", maxDocumentBytes)
+		return errDocumentOversize
+	}
+
+	// Extract first (before any DB writes) so a failure leaves no partial node.
+	var (
+		chunks []chunker.ExtractedChunk
+		stats  chunker.ExtractStats
+		err    error
+		kind   string
+	)
+	switch ext {
+	case ".pdf":
+		kind = "pdf_text"
+		chunks, stats, err = chunker.ChunkPDF(ctx, f.Path, title, r.Cfg, r.Counter, r.PDFCfg)
+	case ".docx", ".odt":
+		kind = "office_text"
+		chunks, stats, err = chunker.ChunkOffice(ctx, f.Path, title, ext, r.Cfg, r.Counter)
+	default:
+		// IsBinaryDocumentExt and this switch must agree; a new ext added there
+		// without a route here is a bug, surfaced visibly rather than silently
+		// prose-chunked.
+		return fmt.Errorf("no extractor for binary document extension %q", ext)
+	}
+	if err != nil {
+		// Attribute the failure to the chunker pass (extraction is pass 2).
+		r.currentPass = PassChunker
+		// Normalize the known sentinels to their bare marker so
+		// pipeline_state.error_message is exactly the grep-able marker
+		// (the prefix logSummary buckets on), regardless of any wrapping
+		// detail the extractor added. A context cancellation is NOT a per-file
+		// failure — propagate it so processOneFile treats it as shutdown.
+		switch {
+		case errors.Is(err, context.Canceled):
+			return err
+		case errors.Is(err, chunker.ErrDependencyMissing):
+			return chunker.ErrDependencyMissing
+		case errors.Is(err, chunker.ErrExtractionQuality):
+			return chunker.ErrExtractionQuality
+		case errors.Is(err, chunker.ErrExtractionEmpty):
+			return chunker.ErrExtractionEmpty
+		case errors.Is(err, chunker.ErrExtractionTimeout):
+			return chunker.ErrExtractionTimeout
+		case errors.Is(err, chunker.ErrExtractionOversize):
+			return chunker.ErrExtractionOversize
+		case errors.Is(err, chunker.ErrTooManyChunks):
+			return chunker.ErrTooManyChunks
+		default:
+			return err
+		}
+	}
+	// Defense in depth (F1): the chunker already returns ErrExtractionEmpty on a
+	// zero-chunk extraction, but guard here too so a future extractor that forgets
+	// the sentinel still cannot mark a file done-with-zero-chunks (silently
+	// unsearchable, dropped from PendingFiles forever).
+	if len(chunks) == 0 {
+		r.currentPass = PassChunker
+		return chunker.ErrExtractionEmpty
+	}
+
+	now := time.Now().Unix()
+
+	// Pass 1: structural — a single 'file' node carrying extraction stats.
+	r.currentPass = PassStructural
+	if err := markStatusTx(ctx, tx, f.ID, PassStructural, StatusRunning, ""); err != nil {
+		return err
+	}
+	props, err := json.Marshal(map[string]any{
+		"mime":            f.Mime,
+		"extraction":      stats,
+		"extractor_kind":  kind,
+		"extracted_chars": extractedCharCount(chunks),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal document props: %w", err)
+	}
+	var fileNodeID int64
+	if err := tx.QueryRowContext(ctx, `
+INSERT INTO nodes(file_id, node_type, name, properties, provenance, created_at, updated_at)
+VALUES (?, 'file', ?, ?, 'EXTRACTED', ?, ?)
+RETURNING node_id`, f.ID, title, string(props), now, now).Scan(&fileNodeID); err != nil {
+		return fmt.Errorf("insert document node: %w", err)
+	}
+	if err := markStatusTx(ctx, tx, f.ID, PassStructural, StatusDone, ""); err != nil {
+		return err
+	}
+
+	// Pass 2: chunker — insert the extractor's chunks (chunks_ai syncs FTS).
+	r.currentPass = PassChunker
+	if err := markStatusTx(ctx, tx, f.ID, PassChunker, StatusRunning, ""); err != nil {
+		return err
+	}
+	r.embedBuf = r.embedBuf[:0]
+	for _, c := range chunks {
+		var header any
+		if c.Header != "" {
+			header = c.Header
+		}
+		var chunkID int64
+		if err := tx.QueryRowContext(ctx, `
+INSERT INTO chunks(node_id, text, byte_start, byte_end, token_count, chunk_kind, header)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING chunk_id`, fileNodeID, c.Text, c.ByteStart, c.ByteEnd, c.TokenCount, kind, header).Scan(&chunkID); err != nil {
+			return fmt.Errorf("insert %s chunk: %w", kind, err)
+		}
+		r.embedBuf = append(r.embedBuf, pendingChunk{chunkID: chunkID, text: c.Text})
+	}
+	if err := markStatusTx(ctx, tx, f.ID, PassChunker, StatusDone, ""); err != nil {
+		return err
+	}
+
+	// Pass 3: embeddings — same buffered batch path as text files.
+	r.currentPass = PassEmbeddings
+	if err := markStatusTx(ctx, tx, f.ID, PassEmbeddings, StatusRunning, ""); err != nil {
+		return err
+	}
+	// Re-batch the buffer through flushEmbedBatch in batchSize-sized slabs.
+	pending := r.embedBuf
+	r.embedBuf = r.embedBuf[:0]
+	for _, c := range pending {
+		r.embedBuf = append(r.embedBuf, c)
+		if len(r.embedBuf) >= r.batchSize() {
+			if err := r.flushEmbedBatch(tx); err != nil {
+				return err
+			}
+		}
+	}
+	if err := r.flushEmbedBatch(tx); err != nil {
+		return err
+	}
+	if err := markStatusTx(ctx, tx, f.ID, PassEmbeddings, StatusDone, ""); err != nil {
+		return err
+	}
+	return nil
+}
+
+// extractedCharCount sums the chunk text lengths for the node properties stats.
+func extractedCharCount(chunks []chunker.ExtractedChunk) int {
+	n := 0
+	for _, c := range chunks {
+		n += len(c.Text)
+	}
+	return n
 }
 
 // runStructural extracts symbols (code with a supported grammar) or
