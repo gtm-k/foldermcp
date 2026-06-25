@@ -35,8 +35,13 @@ func (h *InspectHandler) Inspect(ctx context.Context, req *pb.InspectNodeRequest
 			Status: &pb.SourceStatus{SourceName: "inspect", Status: "EMPTY_BUT_EXECUTED"},
 		}, nil
 	}
+	// Layer 3 EGRESS redaction (D17): same choke point as SearchBroadly — full
+	// Sanitizer over the hydrated node's chunk text before it leaves the daemon
+	// (defense-in-depth over pre-Phase-7 indexes).
+	node := resp.Nodes[0]
+	redactHydratedNode(node)
 	return &pb.InspectNodeResponse{
-		Node:   resp.Nodes[0],
+		Node:   node,
 		Status: &pb.SourceStatus{SourceName: "inspect", Status: "OK"},
 	}, nil
 }

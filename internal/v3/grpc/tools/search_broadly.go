@@ -126,6 +126,12 @@ func (h *SearchBroadlyHandler) SearchBroadly(ctx context.Context, req *pb.Search
 				resp.FailedSources = append(resp.FailedSources, r.name)
 			}
 			if len(r.results) > 0 {
+				// Layer 3 EGRESS redaction (D17): full Sanitizer (patterns +
+				// long-token heuristic) at this single choke point so every hit's
+				// chunk text — and the snippet shapeHits derives from it — is
+				// redacted before it leaves the daemon, covering pre-Phase-7
+				// indexes whose chunks were never ingest-redacted.
+				redactScoredNodes(r.results)
 				rankedLists[r.name] = r.results
 			}
 		case <-ctx.Done():

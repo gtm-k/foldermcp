@@ -11,9 +11,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/gtm-k/foldermcp/internal/sandbox"
 	"github.com/gtm-k/foldermcp/internal/v3/chunker"
 	"github.com/gtm-k/foldermcp/internal/v3/embed"
 	"github.com/gtm-k/foldermcp/internal/v3/grammar"
@@ -80,6 +82,43 @@ type Runner struct {
 	currentPass PassName
 	embedBuf    []pendingChunk
 	failedFiles int
+	// chunksRedactedTotal counts chunks whose text was altered by the INGEST
+	// secret-redaction hook (redactIngest) before INSERT — i.e. a secret was
+	// caught and replaced with [REDACTED] so it is unfindable in FTS/embeddings
+	// (Phase 7 Layer 2, D17). Surfaced in logSummary's end-of-run summary
+	// (grpc/admin/status.go is owned by a concurrent phase, so the counter is
+	// observable via the run-summary log rather than index-v3 status).
+	chunksRedactedTotal int
+}
+
+// jwtPattern matches a JSON Web Token: three base64url segments joined by dots,
+// the first beginning with the canonical `eyJ` (base64 of `{"`). It is a PRECISE
+// pattern, NOT the broad long-token heuristic D17 forbids at ingest: the
+// mandatory dots and `eyJ` anchor mean it cannot match a git SHA, a flat content
+// hash, or a single base64 literal (none contain the dot-delimited triple), so
+// it makes JWTs unfindable at ingest without the collateral damage the 40+-char
+// heuristic would cause. The sandbox pattern list carries no JWT rule and is
+// frozen v0.1.0 code (only the RedactSecrets wrapper is authorized), so this
+// JWT-specific rule lives at the ingest layer alongside RedactSecrets.
+var jwtPattern = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}`)
+
+// redactIngest applies pattern-only secret redaction to chunk text BEFORE it is
+// INSERTed, so a matched secret is replaced with [REDACTED] and never reaches
+// FTS or the embedder. A secret must be UNFINDABLE, not merely masked at
+// display, so this is the load-bearing layer. It combines the sandbox pattern
+// list (sandbox.RedactSecrets — AWS/GitHub/api-key/PEM/sk-, NO long-token
+// heuristic per D17) with the precise jwtPattern above. The 40+-char long-token
+// heuristic is deliberately omitted here: it would destroy git SHAs / content
+// hashes / base64 literals that legitimate code and doc retrieval needs (that
+// heuristic runs only at EGRESS — grpc/tools/redact.go). Increments
+// chunksRedactedTotal when a redaction actually fired.
+func (r *Runner) redactIngest(text string) string {
+	red := sandbox.RedactSecrets(text)
+	red = jwtPattern.ReplaceAllString(red, "[REDACTED]")
+	if red != text {
+		r.chunksRedactedTotal++
+	}
+	return red
 }
 
 type pendingChunk struct {
@@ -513,14 +552,18 @@ RETURNING node_id`, f.ID, title, string(props), now, now).Scan(&fileNodeID); err
 		if c.Header != "" {
 			header = c.Header
 		}
+		// Layer 2 ingest redaction (D17): redact secrets before INSERT so FTS
+		// and embeddings see only redacted text. The SAME redacted text is
+		// embedded (pendingChunk.text) — a leak in either store is a leak.
+		text := r.redactIngest(c.Text)
 		var chunkID int64
 		if err := tx.QueryRowContext(ctx, `
 INSERT INTO chunks(node_id, text, byte_start, byte_end, token_count, chunk_kind, header)
 VALUES (?, ?, ?, ?, ?, ?, ?)
-RETURNING chunk_id`, fileNodeID, c.Text, c.ByteStart, c.ByteEnd, c.TokenCount, kind, header).Scan(&chunkID); err != nil {
+RETURNING chunk_id`, fileNodeID, text, c.ByteStart, c.ByteEnd, c.TokenCount, kind, header).Scan(&chunkID); err != nil {
 			return fmt.Errorf("insert %s chunk: %w", kind, err)
 		}
-		r.embedBuf = append(r.embedBuf, pendingChunk{chunkID: chunkID, text: c.Text})
+		r.embedBuf = append(r.embedBuf, pendingChunk{chunkID: chunkID, text: text})
 	}
 	if err := markStatusTx(ctx, tx, f.ID, PassChunker, StatusDone, ""); err != nil {
 		return err
@@ -678,14 +721,16 @@ RETURNING node_id`, f.ID, title, string(props), now, now).Scan(&fileNodeID); err
 		if c.Header != "" {
 			header = c.Header
 		}
+		// Layer 2 ingest redaction (D17): redact before INSERT; same text embedded.
+		text := r.redactIngest(c.Text)
 		var chunkID int64
 		if err = tx.QueryRowContext(ctx, `
 INSERT INTO chunks(node_id, text, byte_start, byte_end, token_count, chunk_kind, header)
 VALUES (?, ?, ?, ?, ?, ?, ?)
-RETURNING chunk_id`, fileNodeID, c.Text, c.ByteStart, c.ByteEnd, c.TokenCount, c.Kind, header).Scan(&chunkID); err != nil {
+RETURNING chunk_id`, fileNodeID, text, c.ByteStart, c.ByteEnd, c.TokenCount, c.Kind, header).Scan(&chunkID); err != nil {
 			return fmt.Errorf("insert %s chunk: %w", c.Kind, err)
 		}
-		r.embedBuf = append(r.embedBuf, pendingChunk{chunkID: chunkID, text: c.Text})
+		r.embedBuf = append(r.embedBuf, pendingChunk{chunkID: chunkID, text: text})
 	}
 	if err = markStatusTx(ctx, tx, f.ID, PassChunker, StatusDone, ""); err != nil {
 		return err
@@ -787,14 +832,16 @@ RETURNING node_id`, f.ID, filepath.Base(f.Path), string(props), now, now).Scan(&
 		if c.Header != "" {
 			header = c.Header
 		}
+		// Layer 2 ingest redaction (D17): redact before INSERT; same text embedded.
+		text := r.redactIngest(c.Text)
 		var chunkID int64
 		if err := tx.QueryRowContext(ctx, `
 INSERT INTO chunks(node_id, text, byte_start, byte_end, token_count, chunk_kind, header)
 VALUES (?, ?, ?, ?, ?, 'prose', ?)
-RETURNING chunk_id`, fileNodeID, c.Text, c.ByteStart, c.ByteEnd, c.TokenCount, header).Scan(&chunkID); err != nil {
+RETURNING chunk_id`, fileNodeID, text, c.ByteStart, c.ByteEnd, c.TokenCount, header).Scan(&chunkID); err != nil {
 			return fmt.Errorf("insert prose fallback chunk: %w", err)
 		}
-		r.embedBuf = append(r.embedBuf, pendingChunk{chunkID: chunkID, text: c.Text})
+		r.embedBuf = append(r.embedBuf, pendingChunk{chunkID: chunkID, text: text})
 	}
 	if err := markStatusTx(ctx, tx, f.ID, PassChunker, StatusDone, ""); err != nil {
 		return err
@@ -913,6 +960,11 @@ func (r *Runner) runChunker(ctx context.Context, tx *sql.Tx, f fileRow, content 
 
 	var out []pendingChunk
 	insert := func(nodeID int64, text string, byteStart, byteEnd, tokenCount int, kind string, header any) error {
+		// Layer 2 ingest redaction (D17): redact secrets before INSERT so FTS and
+		// embeddings see only redacted text — applied at this single closure so all
+		// code/prose chunks of a text file inherit it. The SAME redacted text is
+		// embedded (out's pendingChunk.text).
+		text = r.redactIngest(text)
 		var chunkID int64
 		if err := tx.QueryRowContext(ctx, `
 INSERT INTO chunks(node_id, text, byte_start, byte_end, token_count, chunk_kind, header)
@@ -1063,7 +1115,11 @@ GROUP BY prefix ORDER BY n DESC LIMIT 3`)
 	if total > 0 {
 		rate = float64(r.failedFiles) / float64(total)
 	}
-	args := []any{"files_total", total, "files_failed", r.failedFiles, "failure_rate", rate}
+	// Phase 7 observability (D17, actor-observability): surface the ingest
+	// redaction counter in the end-of-run summary. grpc/admin/status.go is owned
+	// by a concurrent phase, so this run-summary log is the observable channel
+	// (not index-v3 status).
+	args := []any{"files_total", total, "files_failed", r.failedFiles, "failure_rate", rate, "chunks_redacted_total", r.chunksRedactedTotal}
 	switch {
 	case rate > 0.10:
 		logger.Error("runner: run complete with high failure rate", args...)
