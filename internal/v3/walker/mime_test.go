@@ -139,6 +139,72 @@ func TestClassifyFileBinaryDocumentExempt(t *testing.T) {
 	}
 }
 
+// TestClassifyFileStructuredDataRouted (A5 / R3 reroute): csv/tsv/json/yaml/yml/
+// xml files keep content_class 'data' (no new class value — the files
+// content_class CHECK is not widened, A5 adds no migration) but ARE recognized
+// by IsStructuredDataExt so the runner routes them to the csv/data chunker
+// instead of skipping. Clean (non-binary) data files must keep class 'data'
+// (NOT be downgraded to 'unknown' by the override).
+func TestClassifyFileStructuredDataRouted(t *testing.T) {
+	tmp := t.TempDir()
+	cases := []struct {
+		name, body string
+	}{
+		{"table.csv", "id,name\n1,alice\n2,bob\n"},
+		{"table.tsv", "id\tname\n1\talice\n"},
+		{"config.json", `{"a":1,"b":"x"}`},
+		{"config.yaml", "a: 1\nb: x\n"},
+		{"config.yml", "a: 1\n"},
+		{"doc.xml", "<r><a>1</a></r>"},
+	}
+	for _, c := range cases {
+		path := filepath.Join(tmp, c.name)
+		if err := os.WriteFile(path, []byte(c.body), 0644); err != nil {
+			t.Fatal(err)
+		}
+		_, class, err := ClassifyFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if class != "data" {
+			t.Errorf("%s class = %q, want data (clean structured data keeps 'data')", c.name, class)
+		}
+		if !IsStructuredDataExt(path) {
+			t.Errorf("%s: IsStructuredDataExt=false, want true (runner must route it)", c.name)
+		}
+	}
+}
+
+// TestClassifyFileBinaryJSONStillSkipped (A5 / R3 BLOCKING): a .json whose
+// content is actually binary (NUL bytes) must NOT be indexed by extension — the
+// IsBinaryContent NUL gate downgrades it to 'unknown' so the runner skips it.
+// Index by CONTENT, never blindly by extension.
+func TestClassifyFileBinaryJSONStillSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "actually-binary.json")
+	if err := os.WriteFile(path, []byte("{\x00\x01\x02 not really json}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, class, err := ClassifyFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if class != "unknown" {
+		t.Errorf("class = %q, want unknown (NUL-bearing .json must be downgraded + skipped, R3)", class)
+	}
+}
+
+// TestIsStructuredDataExtExcludesSqlite: .sqlite is a binary DB container and
+// must NOT be treated as a structure-aware text format.
+func TestIsStructuredDataExtExcludesSqlite(t *testing.T) {
+	if IsStructuredDataExt("/tmp/store.sqlite") {
+		t.Error("IsStructuredDataExt(.sqlite)=true, want false (binary DB, not text)")
+	}
+	if IsStructuredDataExt("/tmp/main.go") {
+		t.Error("IsStructuredDataExt(.go)=true, want false")
+	}
+}
+
 // TestClassifyFileCleanTextStillIndexable (regression): a normal text/code file
 // with no NUL bytes must keep its indexable classification — the binary override
 // must not over-trigger.

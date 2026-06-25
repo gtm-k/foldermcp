@@ -49,3 +49,28 @@ func IsBinaryDocumentExt(path string) bool {
 	_, ok := binaryDocumentExts[strings.ToLower(filepath.Ext(path))]
 	return ok
 }
+
+// structuredDataExts is the single source of truth (A5/R3) for structure-aware
+// TEXT data formats the runner routes to the csv/data chunker instead of
+// skipping. These keep content_class 'data' (no new class value — the 0001
+// files.content_class CHECK is not widened and A5 adds no migration), so the
+// walker classifier and the runner must agree on the set via this one predicate.
+// .sqlite is deliberately EXCLUDED: it is a binary DB container, not a text
+// format, so it stays in the skipped 'data' class.
+var structuredDataExts = map[string]struct{}{
+	".csv":  {},
+	".tsv":  {},
+	".json": {},
+	".yaml": {},
+	".yml":  {},
+	".xml":  {},
+}
+
+// IsStructuredDataExt reports whether path's final extension names a
+// structure-aware text data format (csv/tsv/json/yaml/yml/xml) that the runner
+// indexes via the csv/data chunker. Pure-Go (untagged) so the no-cgo CI matrix
+// and non-cgo callers can use it, mirroring IsBinaryDocumentExt.
+func IsStructuredDataExt(path string) bool {
+	_, ok := structuredDataExts[strings.ToLower(filepath.Ext(path))]
+	return ok
+}

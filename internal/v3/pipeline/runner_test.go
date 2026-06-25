@@ -811,7 +811,11 @@ func TestRunner_NonIndexableSkipped(t *testing.T) {
 	dir := seedDir(t, map[string]string{
 		"photo.png": "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR pretend image payload",
 		"clip.mp3":  "ID3\x04\x00\x00\x00 pretend audio payload",
-		"table.csv": "name,value\nfoo,1\nbar,2\n", // clean text, but .csv → data → skipped
+		// A5 reroutes csv/tsv/json/yaml/xml OUT of the skipped 'data' class into the
+		// chunker, so a .csv is no longer a valid "skipped" representative. .sqlite
+		// stays in the skipped 'data' class (binary DB container, not a text format),
+		// so it is the correct stand-in for the data class here.
+		"store.sqlite": "SQLite format 3\x00\x01\x02 pretend db page bytes",
 		// renamed.txt exercises the walker's content-binary override end-to-end:
 		// a text EXTENSION (classFromExtOrMime → 'document') whose early NUL makes
 		// the walker downgrade it to 'unknown'. Without the override this file
@@ -828,7 +832,7 @@ func TestRunner_NonIndexableSkipped(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, name := range []string{"photo.png", "clip.mp3", "table.csv", "renamed.txt", "blob_noext"} {
+	for _, name := range []string{"photo.png", "clip.mp3", "store.sqlite", "renamed.txt", "blob_noext"} {
 		id := fileIDByPathSuffix(t, db, name)
 		for _, pass := range []string{"structural", "chunker", "embeddings"} {
 			var status, msg string
@@ -890,5 +894,250 @@ func TestRunner_BinaryContentSkipped(t *testing.T) {
 	mdID := fileIDByPathSuffix(t, db, "notes.md")
 	if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, mdID); got != 1 {
 		t.Errorf("notes.md embeddings done = %d, want 1", got)
+	}
+}
+
+// TestRunner_StructuredDataIndexed (A5): a .csv and a .json file — formerly
+// skipped as content_class 'data' — are now chunked + embedded with the right
+// chunk_kinds (csv_schema/csv_rows for CSV, data_structured for JSON), reaching
+// embeddings done. A .yaml and .xml round out the structure-aware formats.
+func TestRunner_StructuredDataIndexed(t *testing.T) {
+	db := openTestDB(t)
+	var csvb strings.Builder
+	csvb.WriteString("id,name,price\n")
+	for i := 0; i < 50; i++ {
+		csvb.WriteString("1,tungsten widget,9.99\n")
+	}
+	dir := seedDir(t, map[string]string{
+		"products.csv":  csvb.String(),
+		"config.json":   `{"service":"indexer","note":"cobalt isotope probe"}`,
+		"settings.yaml": "service: indexer\nnote: molybdenum filament probe\n",
+		"doc.xml":       "<config><note>vanadium oxide probe</note></config>",
+		"notes.md":      mdFixture,
+	})
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// CSV → csv_schema + csv_rows, all passes done, embeddings == chunks.
+	csvID := fileIDByPathSuffix(t, db, "products.csv")
+	for _, pass := range []string{"structural", "chunker", "embeddings"} {
+		var status, msg string
+		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, csvID, pass).Scan(&status, &msg); err != nil {
+			t.Fatalf("csv %s row: %v", pass, err)
+		}
+		if status != "done" {
+			t.Errorf("csv %s = (%q,%q), want done", pass, status, msg)
+		}
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=? AND c.chunk_kind='csv_schema'`, csvID); got != 1 {
+		t.Errorf("csv_schema chunks = %d, want 1", got)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=? AND c.chunk_kind='csv_rows'`, csvID); got == 0 {
+		t.Error("no csv_rows chunks")
+	}
+	csvChunks := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, csvID)
+	csvEmb := count(t, db, `SELECT COUNT(*) FROM embeddings e JOIN chunks c ON e.chunk_id=c.chunk_id JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, csvID)
+	if csvEmb != csvChunks {
+		t.Errorf("csv embeddings=%d chunks=%d, want equal", csvEmb, csvChunks)
+	}
+
+	// JSON/YAML/XML → data_structured chunks.
+	for _, suffix := range []string{"config.json", "settings.yaml", "doc.xml"} {
+		id := fileIDByPathSuffix(t, db, suffix)
+		var status string
+		if err := db.QueryRow(`SELECT status FROM pipeline_state WHERE file_id=? AND pass_name='embeddings'`, id).Scan(&status); err != nil {
+			t.Fatalf("%s embeddings row: %v", suffix, err)
+		}
+		if status != "done" {
+			t.Errorf("%s embeddings status = %q, want done", suffix, status)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=? AND c.chunk_kind='data_structured'`, id); got == 0 {
+			t.Errorf("%s produced no data_structured chunks", suffix)
+		}
+	}
+
+	// FTS hits on probe phrases that only exist inside structured-data files.
+	for _, probe := range []string{"cobalt", "molybdenum", "vanadium"} {
+		if got := count(t, db, `SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH ?`, probe); got == 0 {
+			t.Errorf("no FTS hit for structured-data probe %q", probe)
+		}
+	}
+}
+
+// TestRunner_MalformedCSVFallsBackAmbiguous (A5 / D18): a ragged CSV falls back
+// to prose chunking and its file NODE row carries provenance='AMBIGUOUS'
+// (provenance is a nodes column, not chunks). The file still indexes — never
+// crashes, never skipped.
+func TestRunner_MalformedCSVFallsBackAmbiguous(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{
+		// Ragged: column counts vary wildly → ChunkCSV returns ErrDataFallback.
+		"ragged.csv": "a,b,c\n1,2\n3,4,5,6,7\nx\n,,\n9,10,11,12,13\n",
+	})
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	id := fileIDByPathSuffix(t, db, "ragged.csv")
+	// Embeddings done (indexed as prose, not skipped/failed).
+	var status string
+	if err := db.QueryRow(`SELECT status FROM pipeline_state WHERE file_id=? AND pass_name='embeddings'`, id).Scan(&status); err != nil {
+		t.Fatalf("embeddings row: %v", err)
+	}
+	if status != "done" {
+		t.Errorf("ragged.csv embeddings = %q, want done (prose fallback)", status)
+	}
+	// The file node row is AMBIGUOUS (D18: provenance on the node, by query).
+	if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=? AND provenance='AMBIGUOUS'`, id); got != 1 {
+		t.Errorf("AMBIGUOUS file nodes = %d, want 1 (D18 malformed CSV)", got)
+	}
+	// Fallback produced prose chunks, NOT csv_schema/csv_rows.
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=? AND c.chunk_kind='prose'`, id); got == 0 {
+		t.Error("no prose chunks from malformed-CSV fallback")
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=? AND c.chunk_kind IN ('csv_schema','csv_rows')`, id); got != 0 {
+		t.Errorf("malformed CSV minted %d csv_* chunks, want 0 (should fall back)", got)
+	}
+}
+
+// TestRunner_BinaryJSONSkipped (A5 / R3 BLOCKING): a .json whose CONTENT is
+// binary (NUL bytes) is skipped, never chunked — the classifier downgrades it to
+// 'unknown' (NUL gate) so the runner's non-indexable skip drops it. Index by
+// content, not by extension.
+func TestRunner_BinaryJSONSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "binary.json", []byte("{\x00\x01\x02 not really json at all}"))
+	writeFile(t, dir, "good.json", []byte(`{"k":"real json value"}`))
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	binID := fileIDByPathSuffix(t, db, "binary.json")
+	for _, pass := range []string{"structural", "chunker", "embeddings"} {
+		var status string
+		if err := db.QueryRow(`SELECT status FROM pipeline_state WHERE file_id=? AND pass_name=?`, binID, pass).Scan(&status); err != nil {
+			t.Fatalf("binary.json %s row: %v", pass, err)
+		}
+		if status != "skipped" {
+			t.Errorf("binary.json %s = %q, want skipped (R3 NUL gate)", pass, status)
+		}
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, binID); got != 0 {
+		t.Errorf("binary .json produced %d chunks, want 0", got)
+	}
+	// The genuine JSON alongside it indexes.
+	goodID := fileIDByPathSuffix(t, db, "good.json")
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=? AND c.chunk_kind='data_structured'`, goodID); got == 0 {
+		t.Error("good.json produced no data_structured chunks")
+	}
+}
+
+// TestRunner_EmptyDataFileSkipped (FIX 1, BLOCKING): an empty/whitespace-only
+// structured-data file must be OBSERVABLY skipped (status=skipped,
+// error_message="empty_content", ZERO chunks) — NOT marked done-with-zero-chunks.
+// A done-with-zero-chunks file is dropped from PendingFiles forever and silently
+// unsearchable (the same silent-failure class A4 guards for extracted documents).
+// A "{}" JSON is a valid empty object and is the control: it must still index.
+func TestRunner_EmptyDataFileSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{
+		"empty.csv":     "",     // 0-byte CSV
+		"empty.json":    "",     // truly empty (NOT "{}")
+		"blank.yaml":    "  \n", // whitespace-only YAML
+		"emptyobj.json": "{}",   // valid empty object — control, MUST index
+	})
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, suffix := range []string{"empty.csv", "empty.json", "blank.yaml"} {
+		id := fileIDByPathSuffix(t, db, suffix)
+		for _, pass := range []string{"structural", "chunker", "embeddings"} {
+			var status, msg string
+			if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, id, pass).Scan(&status, &msg); err != nil {
+				t.Fatalf("%s %s row: %v", suffix, pass, err)
+			}
+			if status != "skipped" || msg != "empty_content" {
+				t.Errorf("%s %s = (%q,%q), want (skipped, empty_content)", suffix, pass, status, msg)
+			}
+		}
+		// ZERO chunks — and crucially NOT embeddings=done-with-zero-chunks.
+		if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, id); got != 0 {
+			t.Errorf("%s produced %d chunks, want 0", suffix, got)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, id); got != 0 {
+			t.Errorf("%s embeddings marked done — silent done-with-zero-chunks (FIX 1 regression)", suffix)
+		}
+	}
+
+	// Control: "{}" is a valid empty JSON object — NON-empty text (2 bytes) — and
+	// must INDEX, not be skipped as empty_content. The structure-aware chunker
+	// finds no leaves to outline so it declines (ErrDataFallback, reason
+	// "empty_structure") and the file is prose-chunked: the 2-byte body "{}" yields
+	// a prose chunk and reaches embeddings=done. The load-bearing guarantee FIX 1
+	// must not break is "{} indexes (done, non-zero chunks), never skipped".
+	objID := fileIDByPathSuffix(t, db, "emptyobj.json")
+	var objStatus, objMsg string
+	if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name='embeddings'`, objID).Scan(&objStatus, &objMsg); err != nil {
+		t.Fatalf("emptyobj.json embeddings row: %v", err)
+	}
+	if objStatus != "done" {
+		t.Errorf("emptyobj.json embeddings = (%q,%q), want done ({} is a valid non-empty body, must index — not skipped)", objStatus, objMsg)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, objID); got == 0 {
+		t.Error("emptyobj.json ({}) produced zero chunks — FIX 1 must not skip a valid non-empty object")
+	}
+}
+
+// TestRunner_BinaryDataPast8KBSkipped (FIX 5, R3 defense-in-depth): a .json that
+// is CLEAN through the first ~9 KB then carries a NUL byte PAST the 8 KB classifier
+// sample window. The classifier (layer a) samples only 8 KB, so it sees clean text
+// and keeps content_class 'data'; the file reaches runDataDocument, whose FULL-BODY
+// IsBinaryContent re-check (layer b) must fire and skip it with
+// "binary_content_detected" and ZERO chunks. This pins the runner re-check that
+// TestRunner_BinaryJSONSkipped (NUL in the first bytes) never reaches.
+func TestRunner_BinaryDataPast8KBSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	// ~9 KB of clean JSON-ish text (no NUL) — beyond the 8192-byte sniff window —
+	// then a NUL byte. The classifier samples only 8 KB and sees clean text.
+	var b bytes.Buffer
+	b.WriteString(`{"data":"`)
+	for b.Len() < 9000 {
+		b.WriteString("clean-text-padding ")
+	}
+	b.WriteString(`",`)
+	b.WriteByte(0x00) // NUL past the 8 KB classifier window
+	b.WriteString(`"x":1}`)
+	writeFile(t, dir, "late-binary.json", b.Bytes())
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	id := fileIDByPathSuffix(t, db, "late-binary.json")
+	// content_class must still be 'data' — proving the classifier did NOT catch it
+	// and the runner's full-body re-check (layer b) is what fired.
+	var cc string
+	if err := db.QueryRow(`SELECT content_class FROM files WHERE file_id=?`, id).Scan(&cc); err != nil {
+		t.Fatalf("content_class: %v", err)
+	}
+	if cc != "data" {
+		t.Errorf("content_class = %q, want data (classifier must NOT have caught the late NUL — else layer b is untested)", cc)
+	}
+	for _, pass := range []string{"structural", "chunker", "embeddings"} {
+		var status, msg string
+		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, id, pass).Scan(&status, &msg); err != nil {
+			t.Fatalf("%s row: %v", pass, err)
+		}
+		if status != "skipped" || msg != "binary_content_detected" {
+			t.Errorf("%s = (%q,%q), want (skipped, binary_content_detected) — runner full-body re-check (R3 layer b)", pass, status, msg)
+		}
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, id); got != 0 {
+		t.Errorf("late-binary .json produced %d chunks, want 0", got)
 	}
 }
