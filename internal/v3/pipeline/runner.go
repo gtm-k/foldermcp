@@ -427,6 +427,18 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 		return nil
 	}
 
+	// FIX 2 (symmetry with the data path): an empty / whitespace-only .go/.md/.txt is
+	// legitimately empty — short-circuit to an observable skip BEFORE runStructural
+	// inserts any node, mirroring runDataDocument's empty short-circuit. Without this,
+	// runStructural creates a file node, the post-runChunker zero-chunk guard fires
+	// and markSkipped marks the passes skipped, but the file NODE row is left
+	// STRANDED — metadata/filename search return it (with zero chunks), leaking a
+	// phantom result for an emptied file. Skipping before the node insert means no
+	// node is ever created, exactly as the data path does.
+	if len(strings.TrimSpace(string(content))) == 0 {
+		return r.markSkipped(ctx, tx, f, "empty_content")
+	}
+
 	// Pass 1: structural.
 	symNodes, fileNodeID, syms, err := r.runStructural(ctx, tx, f, content)
 	if err != nil {
@@ -441,20 +453,24 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 	}
 
 	// FIX 1 (CRITICAL, systemic): close the zero-chunk-done hole on the PLAIN
-	// CODE/PROSE path. A .go/.md/.txt edited to empty (or whitespace-only) reaches
-	// here classed code/document; ChunkProse("") returns nil, runChunker produces
-	// ZERO chunks, and (pre-fix) all three passes were marked StatusDone — a file
-	// done-with-zero-chunks is silently unsearchable AND dropped from PendingFiles
-	// forever. This is the SAME silent-failure class the extracted-document path
-	// guards via ErrExtractionEmpty and the structured-data path via
-	// markDataSkipped("empty_content"). Enforce the shared invariant here too: a
-	// non-binary file that yields zero chunks is observably SKIPPED
-	// ("empty_content"), never embeddings=done. markSkipped re-marks all three
-	// passes (overwriting the structural/chunker 'done' rows runStructural/
-	// runChunker already wrote, within this same transaction) so status is
-	// consistent with the data path. An empty source file is legitimately empty,
-	// so this is StatusSkipped (not a failure), mirroring binary_content_detected.
+	// CODE/PROSE path. The empty/whitespace-only case is now handled BEFORE
+	// runStructural (FIX 2 early-exit above), so this remains a DEFENSIVE BACKSTOP
+	// for the residual case where NON-EMPTY content still yields zero chunks (a
+	// future chunker edge case). runStructural has already inserted a node by now, so
+	// — unlike the early-exit — we must delete the just-inserted node(s) within this
+	// transaction before markSkipped, or the file is left with a STRANDED node row
+	// (metadata/filename search would return it with zero chunks). A file that yields
+	// zero chunks is observably SKIPPED ("empty_content"), never embeddings=done
+	// (which would be silently unsearchable AND dropped from PendingFiles forever —
+	// the SAME silent-failure class the extracted-document path guards via
+	// ErrExtractionEmpty and the structured-data path via markSkipped). markSkipped
+	// re-marks all three passes (overwriting the structural/chunker 'done' rows
+	// already written within this same transaction). StatusSkipped (not a failure),
+	// mirroring binary_content_detected.
 	if len(chunks) == 0 {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM nodes WHERE file_id = ?`, f.ID); err != nil {
+			return fmt.Errorf("runner: zero-chunk backstop cleanup nodes: %w", err)
+		}
 		return r.markSkipped(ctx, tx, f, "empty_content")
 	}
 

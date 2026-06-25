@@ -1225,6 +1225,13 @@ func TestRunner_EmptyTextFileSkipped(t *testing.T) {
 		if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, id); got != 0 {
 			t.Errorf("%s embeddings marked done despite zero chunks (FIX 1 silent done-with-zero-chunks)", suffix)
 		}
+		// FIX 2 (symmetry with the data path): the empty-text early-exit fires BEFORE
+		// runStructural inserts a file node, so NO stranded node row may exist. A
+		// stranded node would be returned by metadata/filename search (with zero
+		// chunks), leaking a phantom result for an emptied file.
+		if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=?`, id); got != 0 {
+			t.Errorf("%s left %d stranded node row(s), want 0 (FIX 2: skip before node insert)", suffix, got)
+		}
 	}
 
 	// Control: a normal non-empty .go must reach embeddings=done with chunks.

@@ -90,10 +90,20 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL AND f.deleted_at IS NULL`, plac
 }
 
 func fetchTopChunks(ctx context.Context, db *sql.DB, nodeID int64, limit int) ([]*pb.HydratedChunk, error) {
+	// FIX 1c: join nodes + files and filter n.deleted_at/f.deleted_at here too, for
+	// defense-in-depth uniformity. Current callers (hydrateNodes, GetNodes) already
+	// pre-filter the node by file, so this is redundant for them — but it makes the
+	// chunk-egress invariant hold AT THIS PATH regardless of caller, so a future
+	// caller that fetches chunks for a soft-deleted file's node cannot reintroduce
+	// the leak. soft-delete sets ONLY files.deleted_at, hence the f.deleted_at term.
 	rows, err := db.QueryContext(ctx, `
-SELECT chunk_id, text, token_count, chunk_kind
-FROM chunks WHERE node_id=? AND deleted_at IS NULL
-ORDER BY chunk_id LIMIT ?`, nodeID, limit)
+SELECT c.chunk_id, c.text, c.token_count, c.chunk_kind
+FROM chunks c
+JOIN nodes n ON n.node_id = c.node_id
+JOIN files f ON f.file_id = n.file_id
+WHERE c.node_id=?
+  AND c.deleted_at IS NULL AND n.deleted_at IS NULL AND f.deleted_at IS NULL
+ORDER BY c.chunk_id LIMIT ?`, nodeID, limit)
 	if err != nil {
 		return nil, err
 	}

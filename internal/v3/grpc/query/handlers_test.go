@@ -159,13 +159,15 @@ func TestSoftDeletedFileExcludedFromHydrate(t *testing.T) {
 
 	hint := &pb.HydrationHint{Chunks: true, ChunksPerNode: 5}
 
-	// Vector path: both nodes may rank, but the soft-deleted node must NOT hydrate.
+	// Vector path: the soft-deleted node 2 must NOT enter the candidate set at all
+	// (FIX 1b: file/node join filters it BEFORE the LIMIT k, so it never consumes a
+	// top-K slot), and the live node 1 must hydrate.
 	vh := &VectorHandler{DB: db}
 	vresp, err := vh.Search(context.Background(), &pb.VectorSearchRequest{QueryEmbeddingInt8: vec, K: 10, Hydrate: hint})
 	if err != nil {
 		t.Fatalf("vector search: %v", err)
 	}
-	assertSoftDeletedHydrationExcluded(t, "vector", vresp.Results)
+	assertSoftDeletedExcludedFromCandidates(t, "vector", vresp.Results)
 
 	// FTS path: same invariant.
 	fh := &FTSHandler{DB: db}
@@ -173,7 +175,7 @@ func TestSoftDeletedFileExcludedFromHydrate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fts search: %v", err)
 	}
-	assertSoftDeletedHydrationExcluded(t, "fts", fresp.Results)
+	assertSoftDeletedExcludedFromCandidates(t, "fts", fresp.Results)
 
 	// Direct GetNodes by id must also exclude the soft-deleted file's node.
 	nh := &NodesHandler{DB: db}
@@ -189,9 +191,31 @@ func TestSoftDeletedFileExcludedFromHydrate(t *testing.T) {
 	if len(nresp.Nodes) != 1 || nresp.Nodes[0].NodeId != 1 {
 		t.Errorf("GetNodes nodes = %v, want exactly [node 1]", nodeIDs(nresp.Nodes))
 	}
+
+	// FIX 1a: GetChunks by id against the soft-deleted file's chunk (chunk 2, whose
+	// own deleted_at is NULL because soft-delete sets ONLY files.deleted_at) must
+	// return NOTHING — a client holding chunk IDs must not be able to re-fetch the
+	// soft-deleted file's TEXT. The live chunk 1 must still come back.
+	ch := &ChunksHandler{DB: db}
+	cresp, err := ch.Get(context.Background(), &pb.GetChunksRequest{ChunkIds: []int64{1, 2}})
+	if err != nil {
+		t.Fatalf("get_chunks: %v", err)
+	}
+	for _, c := range cresp.Chunks {
+		if c.ChunkId == 2 {
+			t.Errorf("GetChunks returned chunk 2 whose file is soft-deleted — text leaked: %q", c.Text)
+		}
+	}
+	if len(cresp.Chunks) != 1 || cresp.Chunks[0].ChunkId != 1 {
+		t.Errorf("GetChunks chunks = %v, want exactly [chunk 1]", chunkIDs(cresp.Chunks))
+	}
 }
 
-func assertSoftDeletedHydrationExcluded(t *testing.T, path string, results []*pb.ScoredNode) {
+// assertSoftDeletedExcludedFromCandidates asserts the soft-deleted file's node 2 is
+// ABSENT from the result set entirely (FIX 1b — filtered before the LIMIT k, so it
+// never consumes a top-K slot), not merely present-but-unhydrated, and that the live
+// node 1 IS present and hydrated.
+func assertSoftDeletedExcludedFromCandidates(t *testing.T, path string, results []*pb.ScoredNode) {
 	t.Helper()
 	sawLive := false
 	for _, s := range results {
@@ -202,15 +226,21 @@ func assertSoftDeletedHydrationExcluded(t *testing.T, path string, results []*pb
 				t.Errorf("%s: live node 1 was not hydrated", path)
 			}
 		case 2:
-			if s.Hydrated != nil {
-				t.Errorf("%s: soft-deleted file's node 2 was hydrated (path=%q, chunks=%d) — content leaked despite files.deleted_at",
-					path, s.Hydrated.Path, len(s.Hydrated.Chunks))
-			}
+			t.Errorf("%s: soft-deleted file's node 2 entered the candidate set — must be filtered before the top-K (hydrated=%v)",
+				path, s.Hydrated != nil)
 		}
 	}
 	if !sawLive {
 		t.Errorf("%s: live node 1 absent from results — fixture/search problem", path)
 	}
+}
+
+func chunkIDs(chunks []*pb.HydratedChunk) []int64 {
+	out := make([]int64, len(chunks))
+	for i, c := range chunks {
+		out[i] = c.ChunkId
+	}
+	return out
 }
 
 func nodeIDs(nodes []*pb.HydratedNode) []int64 {
