@@ -1,8 +1,8 @@
 //go:build harness
 
-// Retrieval harness — measures recall@10 and NDCG@10 across three search modes
-// (auto, lexical, filename) against a labeled query set, then checks M1 exit
-// gate G5: auto mode must beat filename-only baseline.
+// Retrieval harness — measures recall@10 and NDCG@10 across four search modes
+// (auto, lexical, filename, semantic) against a labeled query set, then checks
+// M1 exit gate G5: auto mode must beat filename-only baseline.
 //
 // Usage:
 //
@@ -44,9 +44,9 @@ type LabeledQuerySet struct {
 
 // Query is a single labeled query with relevance judgments.
 type Query struct {
-	ID        string    `yaml:"id"`
-	Text      string    `yaml:"text"`
-	Persona   string    `yaml:"persona"`
+	ID        string     `yaml:"id"`
+	Text      string     `yaml:"text"`
+	Persona   string     `yaml:"persona"`
 	Judgments []Judgment `yaml:"judgments"`
 }
 
@@ -106,8 +106,10 @@ func main() {
 
 	client := pb.NewIndexToolsClient(conn)
 
-	// Run each mode and compute aggregate metrics
-	modes := []string{"auto", "lexical", "filename"}
+	// Run each mode and compute aggregate metrics. "semantic" isolates the
+	// vector channel so its recall can be compared against lexical/filename and
+	// the fused "auto" mode (quantifies how much fusion rescues weak vector hits).
+	modes := []string{"auto", "lexical", "filename", "semantic"}
 	recalls := make(map[string]float64)
 	ndcgs := make(map[string]float64)
 
@@ -161,6 +163,7 @@ func main() {
 	fmt.Printf("auto            %.3f       %.3f\n", recalls["auto"], ndcgs["auto"])
 	fmt.Printf("lexical (FTS)   %.3f       %.3f\n", recalls["lexical"], ndcgs["lexical"])
 	fmt.Printf("filename-only   %.3f       %.3f\n", recalls["filename"], ndcgs["filename"])
+	fmt.Printf("semantic (vec)  %.3f       %.3f\n", recalls["semantic"], ndcgs["semantic"])
 	fmt.Println()
 
 	// Compute multipliers (guard against division by zero)

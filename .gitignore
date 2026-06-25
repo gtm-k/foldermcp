@@ -69,3 +69,16 @@ internal/v3/embed/model/tokenizer.json
 
 # Packaging caches (downloaded ONNX runtime, staged sqlite headers)
 /.cache/
+
+# Local tooling / scratch (kept on disk, never committed)
+.claude/
+.codex-review/
+*.stackdump
+
+# Scratch demo folder (v2-era manual test workspace)
+/qa-workspace/
+
+# QA workspace fixtures: downloaded/generated, not checked in (see MANIFEST.yaml).
+# Keep the manifest tracked; ignore the bulk content.
+/testdata/v3/qa-workspace/*
+!/testdata/v3/qa-workspace/MANIFEST.yaml
