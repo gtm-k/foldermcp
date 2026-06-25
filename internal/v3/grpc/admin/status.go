@@ -73,6 +73,29 @@ SELECT pass_name || '_failed', COUNT(*) FROM pipeline_state WHERE status='failed
 		}
 	}
 
+	// Q2 (actor-observability): surface per-pass skip counts via synthetic
+	// '<pass>_skipped' keys, mirroring the '<pass>_failed' block above. The
+	// runner marks non-indexable files (images, media, binary content/documents)
+	// 'skipped'; without these keys the skipped population is invisible and
+	// FilesTotal − FilesIndexed silently conflates skipped, failed, and pending.
+	srows, err := h.DB.QueryContext(ctx, `
+SELECT pass_name || '_skipped', COUNT(*) FROM pipeline_state WHERE status='skipped' GROUP BY pass_name`)
+	if err != nil {
+		slog.Warn("status: skip-count query failed — '<pass>_skipped' counts omitted", "error", err)
+	} else {
+		defer func() { _ = srows.Close() }()
+		for srows.Next() {
+			var name string
+			var n int64
+			if err := srows.Scan(&name, &n); err == nil {
+				passCounts[name] = n
+			}
+		}
+		if err := srows.Err(); err != nil {
+			slog.Warn("status: skip-count iteration failed — '<pass>_skipped' counts may be incomplete", "error", err)
+		}
+	}
+
 	var uuid string
 	_ = h.DB.QueryRowContext(ctx, `SELECT value FROM config WHERE key='instance_uuid'`).Scan(&uuid)
 

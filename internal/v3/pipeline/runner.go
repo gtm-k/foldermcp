@@ -270,7 +270,7 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 	// DELETEs + status upserts on every Run — negligible at fixture
 	// scale, linear in binary-doc count on a 1-TB workspace. Treat
 	// 'skipped' as terminal in the selector when M2 lands extraction.
-	if f.ContentClass == "document" && isBinaryDocument(f.Path) {
+	if f.ContentClass == "document" && walker.IsBinaryDocumentExt(f.Path) {
 		for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
 			if err = markStatusTx(ctx, tx, f.ID, p, StatusSkipped, "binary_document_pending_m2"); err != nil {
 				return err
@@ -283,6 +283,21 @@ func (r *Runner) runPerFile(ctx context.Context, f fileRow) (err error) {
 	content, err := readFileContent(f.Path, f.Size)
 	if err != nil {
 		return err
+	}
+
+	// Defense in depth (Q2): the walker downgrades binary content to a
+	// non-indexable class from an 8 KB sample, but a file whose binary bytes
+	// begin past that window reaches here still classed code/document. Re-check
+	// the full body against the same predicate and skip rather than prose-chunk
+	// garbage. Using walker.IsBinaryContent (not a second local rule) keeps the
+	// classifier and the runner from ever disagreeing on what "binary" means.
+	if walker.IsBinaryContent(content) {
+		for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
+			if err = markStatusTx(ctx, tx, f.ID, p, StatusSkipped, "binary_content_detected"); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	// Pass 1: structural.
@@ -468,19 +483,6 @@ func (r *Runner) flushEmbedBatch(tx *sql.Tx) error {
 	}
 	r.embedBuf = r.embedBuf[:0]
 	return nil
-}
-
-// isBinaryDocument reports whether a 'document'-class file is a binary
-// container format the M1 pipeline cannot extract text from. The list
-// mirrors the binary subset of the walker's document classifier
-// (walker/mime.go): .pdf/.docx/.odt are binary; .md/.txt/.rst/.org/.tex
-// are plain text and chunk as prose.
-func isBinaryDocument(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".pdf", ".docx", ".odt":
-		return true
-	}
-	return false
 }
 
 // extractorFor selects the grammar for a code file by extension (§4.2.6).

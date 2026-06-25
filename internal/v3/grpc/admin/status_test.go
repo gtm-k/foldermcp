@@ -115,6 +115,70 @@ func TestStatusSurfacesFailureCounts(t *testing.T) {
 	}
 }
 
+// TestStatusSurfacesSkippedCounts (Q2 observability): skipped pipeline_state
+// rows surface in pass_counts under synthetic '<pass>_skipped' keys, mirroring
+// the '<pass>_failed' pattern. Without this, the skipped population (images,
+// media, binary files) is invisible — an operator could only infer it from
+// FilesTotal − FilesIndexed, which also folds in failed and pending files.
+//
+// Note these are per-PASS row counts (a skipped file has one row per pass, so it
+// appears in all three '<pass>_skipped' keys), exactly like '<pass>_failed' and
+// the plain '<pass>' done keys. For a per-FILE figure, anchor on a single pass —
+// embeddings_skipped — the way FilesIndexed anchors on embeddings_done; summing
+// all three keys would triple-count.
+func TestStatusSurfacesSkippedCounts(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "st.db"), Tier: store.TierMid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(db, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 1; i <= 6; i++ {
+		if _, err := db.Exec(`INSERT INTO files(path,sha256,size,mtime,mime,content_class,parent_dir,last_seen)
+			VALUES(?,X'AB',1,1,'application/octet-stream','unknown','/',1)`, fmt.Sprintf("/f%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Files 1–3 fully indexed.
+	for i := 1; i <= 3; i++ {
+		if _, err := db.Exec(`INSERT INTO pipeline_state(file_id,pass_name,status,checkpoint_at)
+			VALUES(?,'embeddings','done',1)`, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Files 4–6 skipped across all three passes (as the runner marks binaries).
+	for i := 4; i <= 6; i++ {
+		for _, pass := range []string{"structural", "chunker", "embeddings"} {
+			if _, err := db.Exec(`INSERT INTO pipeline_state(file_id,pass_name,status,checkpoint_at)
+				VALUES(?,?,'skipped',1)`, i, pass); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	h := &Handler{DB: db}
+	resp, err := h.Status(context.Background(), &pb.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pass := range []string{"structural", "chunker", "embeddings"} {
+		key := pass + "_skipped"
+		if resp.PassCounts[key] != 3 {
+			t.Errorf("pass_counts[%s] = %d, want 3", key, resp.PassCounts[key])
+		}
+	}
+	if resp.FilesTotal != 6 {
+		t.Errorf("files_total = %d, want 6", resp.FilesTotal)
+	}
+	if resp.FilesIndexed != 3 {
+		t.Errorf("files_indexed = %d, want 3", resp.FilesIndexed)
+	}
+}
+
 func TestHealthOnFreshDB(t *testing.T) {
 	tmp := t.TempDir()
 	db, err := store.Open(store.Options{Path: filepath.Join(tmp, "h.db"), Tier: store.TierMid})

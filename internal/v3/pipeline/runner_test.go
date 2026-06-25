@@ -468,7 +468,7 @@ func TestReprocessLeavesNoOrphanedEmbeddings(t *testing.T) {
 	// Config is no longer possible here: the Runner's policy drift guard
 	// rejects any Cfg that differs from chunker.DefaultConfig().)
 	long1 := strings.Repeat("alpha beta gamma delta epsilon zeta. ", 100) // 600 words
-	long2 := strings.Repeat("omicron pi rho sigma kappa. ", 90)          // 450 words
+	long2 := strings.Repeat("omicron pi rho sigma kappa. ", 90)           // 450 words
 	dir := seedDir(t, map[string]string{"multi.md": long1})
 	ctx := context.Background()
 
@@ -547,7 +547,12 @@ func TestRunner_PolicyDriftGuard(t *testing.T) {
 func TestRunner_BinaryDocumentSkipped(t *testing.T) {
 	db := openTestDB(t)
 	dir := seedDir(t, map[string]string{
-		"report.pdf": "%PDF-1.4\n\xe2\xe3\xcf\xd3 binary garbage bytes that must never reach the prose chunker",
+		// A representative PDF: contains NUL bytes in its header region, like
+		// every real compressed PDF. This must STILL get the document path's
+		// 'binary_document_pending_m2' marker — the walker's content-binary
+		// override exempts binary-document extensions precisely so the NUL here
+		// does not reclassify it to 'unknown' and strip the marker.
+		"report.pdf": "%PDF-1.4\n\xe2\xe3\xcf\xd3\x00\x01\x02 binary garbage bytes that must never reach the prose chunker",
 		"notes.md":   mdFixture,
 	})
 	r := newTestRunner(t, db)
@@ -570,6 +575,100 @@ func TestRunner_BinaryDocumentSkipped(t *testing.T) {
 		t.Errorf("binary document produced %d garbage chunks", got)
 	}
 	// The plain-text document still completes the full pipeline.
+	mdID := fileIDByPathSuffix(t, db, "notes.md")
+	if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, mdID); got != 1 {
+		t.Errorf("notes.md embeddings done = %d, want 1", got)
+	}
+}
+
+// TestRunner_NonIndexableSkipped (Q2 Gap B): the image/media/data/unknown skip
+// branch (runner.go ~253) had no test — only the .pdf document branch did. This
+// locks the behavior for every non-indexable class, including the literal PNG
+// case: each file's three passes are marked skipped with the empty marker
+// (distinct from 'binary_document_pending_m2' and 'binary_content_detected'),
+// and none produces a node/chunk/embedding. Characterization test of existing
+// correct behavior — expected to pass on first run.
+func TestRunner_NonIndexableSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{
+		"photo.png": "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR pretend image payload",
+		"clip.mp3":  "ID3\x04\x00\x00\x00 pretend audio payload",
+		"table.csv": "name,value\nfoo,1\nbar,2\n", // clean text, but .csv → data → skipped
+		// renamed.txt exercises the walker's content-binary override end-to-end:
+		// a text EXTENSION (classFromExtOrMime → 'document') whose early NUL makes
+		// the walker downgrade it to 'unknown'. Without the override this file
+		// would be prose-chunked; this is the only fixture here whose skip
+		// depends on the Q2 walker change (blob_noext is already 'unknown' via
+		// the octet-stream mime fallback, independent of the override).
+		"renamed.txt": "looks like a text note\x00\x01\x02 but is actually binary",
+		"blob_noext":  "\x00\x01\x02\x03 raw binary with no extension",
+		"keep.md":     mdFixture,
+	})
+	r := newTestRunner(t, db)
+
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, name := range []string{"photo.png", "clip.mp3", "table.csv", "renamed.txt", "blob_noext"} {
+		id := fileIDByPathSuffix(t, db, name)
+		for _, pass := range []string{"structural", "chunker", "embeddings"} {
+			var status, msg string
+			if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, id, pass).Scan(&status, &msg); err != nil {
+				t.Fatalf("%s %s row: %v", name, pass, err)
+			}
+			if status != "skipped" || msg != "" {
+				t.Errorf("%s %s = (%q, %q), want (skipped, \"\")", name, pass, status, msg)
+			}
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=?`, id); got != 0 {
+			t.Errorf("%s produced %d nodes, want 0", name, got)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id = n.node_id WHERE n.file_id=?`, id); got != 0 {
+			t.Errorf("%s produced %d chunks, want 0", name, got)
+		}
+	}
+	// The real document alongside them still indexes fully.
+	mdID := fileIDByPathSuffix(t, db, "keep.md")
+	if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, mdID); got != 1 {
+		t.Errorf("keep.md embeddings done = %d, want 1", got)
+	}
+}
+
+// TestRunner_BinaryContentSkipped (Q2 Gap A, route 2 + defense-in-depth): a file
+// whose leading bytes are clean text — so the walker's 8 KB sample classifies it
+// 'document' — but whose body then turns binary must be caught by the runner's
+// full-buffer content check before chunking, not prose-chunked as garbage. The
+// clean prefix here must exceed walker's binarySniffBytes (8192) so the file
+// genuinely reaches the runner classified as a text document.
+func TestRunner_BinaryContentSkipped(t *testing.T) {
+	db := openTestDB(t)
+	cleanPrefix := strings.Repeat("clean prose text. ", 1200) // ~21.6 KB, all valid UTF-8
+	binaryTail := string([]byte{0x00, 0x01, 0x02, 0x00})
+	dir := seedDir(t, map[string]string{
+		"header-then-binary.md": cleanPrefix + binaryTail,
+		"notes.md":              mdFixture,
+	})
+	r := newTestRunner(t, db)
+
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	binID := fileIDByPathSuffix(t, db, "header-then-binary.md")
+	for _, pass := range []string{"structural", "chunker", "embeddings"} {
+		var status, msg string
+		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, binID, pass).Scan(&status, &msg); err != nil {
+			t.Fatalf("read %s row: %v", pass, err)
+		}
+		if status != "skipped" || msg != "binary_content_detected" {
+			t.Errorf("%s = (%q, %q), want (skipped, binary_content_detected)", pass, status, msg)
+		}
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id = n.node_id WHERE n.file_id=?`, binID); got != 0 {
+		t.Errorf("binary-bodied file produced %d garbage chunks", got)
+	}
+	// The clean document alongside it still completes the full pipeline.
 	mdID := fileIDByPathSuffix(t, db, "notes.md")
 	if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, mdID); got != 1 {
 		t.Errorf("notes.md embeddings done = %d, want 1", got)
