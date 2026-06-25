@@ -124,15 +124,17 @@ func ChunkPDF(path, title string, cfg Config, counter Counter, pdfCfg PDFConfig)
 	if err != nil {
 		return nil, ExtractStats{}, err
 	}
-	return chunkExtractedPages(text, title, pdfExtractorVersion, cfg, counter)
+	return chunkExtractedPages(text, title, pdfExtractorVersion, cfg, counter, true)
 }
 
 // chunkExtractedPages is the shared page-anchored chunking core used by ChunkPDF
 // (pages already separated by form-feed) and, after the office extractor
 // synthesizes a single-page extraction, by ChunkOffice. It splits text on
-// form-feed into pages, computes the digital-native quality gate, and chunks
-// each page independently so no chunk spans a page boundary.
-func chunkExtractedPages(text, title, extractorVersion string, cfg Config, counter Counter) ([]ExtractedChunk, ExtractStats, error) {
+// form-feed into pages and chunks each page independently so no chunk spans a
+// page boundary. qualityGate enables the digital-native <200-chars/page guard
+// (PDF only — a legitimately short office document must still index, so office
+// passes false).
+func chunkExtractedPages(text, title, extractorVersion string, cfg Config, counter Counter, qualityGate bool) ([]ExtractedChunk, ExtractStats, error) {
 	if cfg == (Config{}) {
 		cfg = DefaultConfig()
 	}
@@ -185,7 +187,7 @@ func chunkExtractedPages(text, title, extractorVersion string, cfg Config, count
 
 	// Digital-native quality gate (D18): an image-only PDF extracts almost no
 	// text; flag it visibly rather than indexing an empty document.
-	if pageNum > 0 && stats.CharsPerPageMedian < minCharsPerPage {
+	if qualityGate && pageNum > 0 && stats.CharsPerPageMedian < minCharsPerPage {
 		return nil, stats, ErrExtractionQuality
 	}
 	return out, stats, nil
