@@ -5,178 +5,223 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io)
 
-**Turn any folder into a secure MCP tool server.**
+**Turn any folder into a private, local-first semantic index your AI assistant can search — nothing leaves your machine.**
 
-FolderMCP scans directories containing Python, TypeScript/JavaScript, OpenAPI specs,
-shell scripts, and documents (PDFs, images, CSVs, Markdown), then serves them as
-[MCP (Model Context Protocol)](https://modelcontextprotocol.io) tools and resources.
-It handles discovery, introspection, dependency management, sandboxed execution, and
-protocol translation automatically -- no SDK, no wrapper code, no manifest to maintain.
+Point FolderMCP at a folder of code, docs, PDFs, and notes. It reads everything once,
+builds a "search brain" in a **single file on your own disk**, and serves it to AI tools
+(Claude, Cursor, VS Code, …) through [MCP (Model Context Protocol)](https://modelcontextprotocol.io).
+Your assistant can then find the right piece by **meaning**, not just keywords — even when the
+folder lives on a shared network drive, and **without uploading a single byte to the cloud**.
 
-## Why FolderMCP?
+> **Status.** v3 (local semantic retrieval, described below) is the active line of development
+> and ships behind transitional `-v3` subcommands built from source. The original **v0.1.0 MCP
+> tool server** — turning a folder of functions and scripts into callable MCP tools — remains
+> available and is documented [further down](#v010--mcp-tool-server).
 
-- **Zero boilerplate for all languages.** Drop a Python function, TypeScript export, OpenAPI spec, or shell script into a folder and it becomes an MCP tool. PDFs, images, and CSVs become MCP resources. No SDK integration required.
-- **Secure by default.** Every tool starts in a `pending` state with deny-by-default permissions. Execution is sandboxed with configurable timeouts, output limits, and secret redaction.
-- **NAS and shared drive compatible.** Works on SMB, NFS, Azure Files, and cloud-mounted storage. Auto-detects network filesystems and splits shared config from local state.
-- **One command to connect.** `foldermcp connect <client>` wires your tools into Claude Desktop, Claude Code, Cursor, VS Code, or Windsurf in seconds.
-- **Production-ready workflow.** Three review modes (dev, team, production), structured audit logging, Docker/Cloud Run deployment, and health/metrics endpoints.
+## How it works
 
-## Quick Start
+FolderMCP is a **split-daemon** design: a heavy *indexer* that writes the index, and a fast,
+read-only *query server* that answers searches. They never block each other, and they share one
+SQLite file.
+
+```mermaid
+flowchart TB
+    FOLDER[Your folder<br/>local disk or NAS]
+    subgraph CORE [FolderMCP core · runs on your machine]
+      direction TB
+      IDX[index-v3<br/>indexer · writes<br/>walk → chunk → embed]
+      QRY[serve-v3<br/>query server · read-only<br/>hybrid search]
+      STORE[(index.db · one SQLite file<br/>metadata · FTS5 keywords<br/>sqlite-vec vectors · pipeline state)]
+      IDX -->|writes| STORE
+      QRY -->|reads| STORE
+    end
+    SHIM[mcp-v3<br/>MCP stdio shim<br/>launched per session]
+    AI[AI client<br/>Claude · Cursor · VS Code]
+    FOLDER --> IDX
+    AI <-->|MCP protocol| SHIM
+    SHIM <-->|gRPC over Unix socket / Windows named pipe| QRY
+```
+
+The indexer and query server are split so a long indexing run never blocks an interactive search,
+and the query server can open the database read-only. Everything — text, keyword index, and
+meaning-vectors — lives in **one transactional SQLite file**, so there is no second database to keep
+in sync and nothing to copy but a single file.
+
+## Why FolderMCP
+
+- **Local-first and private.** Every byte stays on your machine. No cloud account, no upload, no per-query cost.
+- **Hybrid retrieval.** Keyword (FTS5/BM25), filename, and semantic vector search run in parallel and fuse with Reciprocal Rank Fusion — more robust than any single channel.
+- **One file holds everything.** Metadata, keyword index, and vectors live in a single SQLite database. Back it up or move it by copying one file; no server to run.
+- **Works on network drives.** SMB, NFS, and NAS mounts are first-class. A polling-by-hash watcher keeps the index fresh where OS file events are unreliable.
+- **Cross-platform and self-contained.** Native Windows, macOS, and Linux. The SQLite engine, vector math, and embedding runtime are compiled in or shipped beside the binary — no Python, no Docker, no toolchain for end users.
+- **MCP-native.** Three tools — `search`, `inspect`, `browse` — that any MCP client already understands. No custom integration.
+
+## Quick start (v3)
+
+v3 currently builds from source and requires a C toolchain (it links SQLite, `sqlite-vec`, and
+tree-sitter via cgo). Self-contained prebuilt bundles are produced by `make v3-package-windows`
+(Windows today; a full release matrix is on the roadmap).
 
 ```bash
-# 1. Install
-go install github.com/gtm-k/foldermcp/cmd/foldermcp@latest
+# 1. Fetch the embedding model (all-MiniLM-L6-v2, ~90 MB) + tokenizer
+make v3-fetch-model
 
-# 2. Initialize
-foldermcp init ./my-tools
+# 2. Build the v3 binary (cgo + SQLite FTS5)
+make v3-build                      # -> build/foldermcp-v3
 
-# 3. Review & approve
-foldermcp review --approve-all
+# 3. Index a folder (writes the index to $FOLDERMCP_STORE)
+export FOLDERMCP_STORE=~/.foldermcp/index
+./build/foldermcp-v3 index-v3 ./my-folder
 
-# 4. Connect to your AI client
-foldermcp connect claude-desktop
-
-# 5. Start serving
-foldermcp serve
+# 4. Try a search from the CLI
+./build/foldermcp-v3 search-v3 "how is config loaded?"
 ```
 
-## Supported Formats
+To use it from an AI client, point the client's MCP config at `foldermcp-v3 mcp-v3` (the shim the
+client launches per session). For local development, `all-v3 <folder>` runs the indexer and query
+server together in one process. Run any command with `--help` for its flags.
 
-| Format | Extensions | What's Discovered | Example |
-|--------|-----------|-------------------|---------|
-| Python | `.py` | Functions with type hints | `def query(sql: str) -> str` |
-| TypeScript/JS | `.ts`, `.js`, `.mjs`, `.cjs` | Exported functions | `export function analyze(data: string)` |
-| OpenAPI | `.yaml`, `.json` | API operations | GET/POST/DELETE endpoints |
-| Shell | `.sh`, `.bash` | Script wrappers | `./deploy.sh` |
-| Documents | `.pdf`, `.md`, `.txt`, `.csv` | MCP Resources | Context docs for AI agents |
-| Images | `.png`, `.jpg`, `.svg` | MCP Resources | Diagrams, screenshots |
+## Indexing pipeline
 
-## CLI Reference
+`index-v3` turns raw files into a searchable index through a **four-pass pipeline**, each pass with
+one job. Binary and media files are detected and skipped rather than chunked as garbage; only text
+and code are indexed.
 
-| Command | Description | Key Flags |
-|---------|-------------|-----------|
-| `foldermcp init [path]` | Initialize a directory as a workspace | `--template` (python, openapi, shell) |
-| `foldermcp review` | Review and approve/disable discovered tools | `--approve-all`, `--confirm`, `--disable`, `--mode`, `--dry-run` |
-| `foldermcp serve` | Start the MCP server | `--transport` (stdio, http), `--mode`, `--port`, `--watch`, `--profile` |
-| `foldermcp connect <client>` | Configure a client (claude-desktop, claude-code, cursor, vscode, windsurf) | `--snippet`, `--mode` |
-| `foldermcp catalog` | List all discovered tools in a table | `--state`, `--risk`, `--type` |
-| `foldermcp status` | Show tool and dependency state summary | `--json` |
-| `foldermcp test [tool]` | Test a tool by running it locally | `--all`, `--force`, `--params` |
-| `foldermcp diff` | Show what would change on re-scan | `--json` |
-| `foldermcp doctor` | Check environment for issues | `--fix` |
-| `foldermcp deploy <target>` | Generate deployment artifacts (docker, cloudrun) | `--dry-run` |
-| `foldermcp export a2a` | Export A2A agent-card.json | `--name`, `--url`, `--version` |
-| `foldermcp logs` | View the audit log | `--follow`, `--json` |
-| `foldermcp ui` | Open Developer Studio dashboard | `--port` (default 3001) |
-| `foldermcp completion` | Generate shell completions (bash, zsh, fish, powershell) | |
+```mermaid
+flowchart TB
+    F[Your folder] --> P0
+    subgraph PIPE [Four-pass indexing pipeline]
+      direction LR
+      P0[Pass 0 · Walk<br/>list files, hash,<br/>classify by content] --> P1[Pass 1 · Structure<br/>tree-sitter parses<br/>Go and Python symbols]
+      P1 --> P2[Pass 2 · Chunk<br/>code-aware /<br/>prose-aware splitting]
+      P2 --> P3[Pass 3 · Embed<br/>each chunk → 384-dim<br/>vector · ONNX MiniLM]
+    end
+    P0 -. binary / media .-> SKIP[skip · not indexed]
+    P3 --> DB[(index.db<br/>text · keywords · vectors)]
+```
 
-All commands support the `--json` global flag for machine-readable output.
+Embedding models read only a small window at a time, so files are split into **chunks** — code along
+function and class boundaries (via tree-sitter), prose along headings and paragraphs. Each chunk
+becomes a 384-number **vector** capturing its meaning, so a query for "connection pooling" can match a
+chunk that says "reuse sockets" with no shared words. Indexing is **incremental and resumable**: files
+are hashed, only changed files are re-processed, and an interrupted run resumes from a checkpoint.
 
-## NAS / Shared Drive Support
+## Search
 
-FolderMCP is designed to work on network-attached storage out of the box:
+A query fans out across **three independent channels** and blends them with **Reciprocal Rank Fusion
+(RRF)** into one ranked list. RRF scores each result by its *rank* in each channel, so a file several
+channels rank highly rises to the top — and it needs no score calibration (BM25 scores and vector
+distances aren't comparable, but their ranks are).
 
-- **Supported filesystems:** SMB, NFS, Azure Files, cloud-mounted storage (Google Drive, OneDrive).
-- **Auto-detection:** Detects network filesystem type at runtime and adapts behavior accordingly.
-- **Split storage:** Shared configuration (`foldermcp.yaml`, tool metadata) lives on the NAS; local state (audit logs, caches) lives per-user on the local machine.
-- **Shared approvals:** Tool approval state is stored on the shared drive so the whole team sees the same review status.
-- **Watch mode:** `foldermcp serve --watch` uses polling-based file watching, which works reliably on network filesystems where inotify/FSEvents are unavailable.
+```mermaid
+flowchart LR
+    Q["Query<br/>(MCP search · inspect · browse,<br/>or search-v3)"] --> K[Keyword · FTS5 BM25<br/>exact words]
+    Q --> N[Filename<br/>path-text match]
+    Q --> V[Vector · sqlite-vec<br/>meaning match]
+    K --> R{{RRF fusion}}
+    N --> R
+    V --> R
+    R --> OUT[One ranked list<br/>files + snippets<br/>+ graph expand]
+```
 
-## HTTP Endpoints (Team/Production Mode)
+Each channel is blind to what the others catch: keyword search nails exact terms and names, filename
+match finds the obvious file, and vector search catches paraphrases. `search-v3 --mode` forces a single
+channel (`lexical`, `semantic`, `filename`) or blends all of them (`auto`, the default).
 
-When running with `--transport http` in team or production mode:
+## v3 CLI reference
 
-- `/healthz` -- health check endpoint
-- `/readyz` -- readiness check endpoint
-- `/metrics` -- Prometheus-compatible metrics
+| Command | Description |
+|---------|-------------|
+| `foldermcp index-v3 [workspace]` | Run the indexer daemon over a folder (cgo build). |
+| `foldermcp all-v3 [workspace]` | Run the indexer + gRPC query server in one process (local dev). |
+| `foldermcp serve-v3` | Run the read-only gRPC query server against an existing index. |
+| `foldermcp mcp-v3` | Run the MCP stdio shim (launched by your AI client per session). |
+| `foldermcp search-v3 <query>` | Search the index (hybrid lexical + semantic) and print ranked matches. |
+| `foldermcp auth-v3 init \| rotate` | Manage the gRPC auth token and self-signed TLS certificate. |
 
-Supports API key authentication and self-signed TLS certificate generation.
+Environment: `FOLDERMCP_STORE` (where the index lives), `FOLDERMCP_MODEL_DIR` (embedding model
+directory), `FOLDERMCP_ORT_LIB` (ONNX Runtime library). A self-contained bundle resolves the model and
+runtime sitting beside the binary, so those are optional there.
 
-## Developer Studio
+## The stack
+
+| Layer | Choice | Why |
+|-------|--------|-----|
+| Language | **Go** | One static binary per OS; easy distribution; good concurrency for the parallel search channels. |
+| CLI | **Cobra** | Clean subcommands and flag handling. |
+| Storage + lexical | **SQLite + FTS5** | A full database in one file, zero server; FTS5 gives BM25 keyword search. |
+| Vector index | **sqlite-vec** | Stores 384-dim vectors *inside the same SQLite file* with exact KNN — no separate vector database, preserving the single-file design. |
+| Embeddings | **ONNX Runtime + all-MiniLM-L6-v2** | A small (~90 MB) model run locally; text → meaning-vectors with no cloud API. |
+| Code parsing | **tree-sitter** | Real syntax trees (Go & Python today) so chunks align to functions and classes. |
+| Transport | **gRPC over Unix socket / named pipe** | Fast, typed local IPC between the shim and query server; abstracted per OS. |
+| AI interface | **MCP** | The standard Claude, Cursor, and VS Code already speak — three tools, instant compatibility. |
+
+The unifying thread: every choice protects four properties at once — **single-file**, **no
+server/cloud**, **works on network drives**, and **private**.
+
+## v0.1.0 — MCP tool server
+
+The original FolderMCP turns a folder of code into callable **MCP tools**: drop in a Python function,
+TypeScript export, OpenAPI spec, or shell script and it becomes a tool; PDFs, images, and CSVs become
+MCP resources. It is secure by default — every tool starts `pending` with deny-by-default permissions,
+and execution is sandboxed with timeouts, output limits, and secret redaction.
 
 ```bash
-foldermcp ui
+foldermcp init ./my-tools        # initialize a workspace
+foldermcp review --approve-all   # review & approve discovered tools
+foldermcp connect claude-desktop # wire into your AI client
+foldermcp serve                  # start the MCP server
 ```
 
-Opens a local web dashboard at `localhost:3001` with:
+| Format | Extensions | Discovered as |
+|--------|-----------|---------------|
+| Python | `.py` | Functions with type hints → tools |
+| TypeScript/JS | `.ts`, `.js`, `.mjs`, `.cjs` | Exported functions → tools |
+| OpenAPI | `.yaml`, `.json` | API operations → tools |
+| Shell | `.sh`, `.bash` | Script wrappers → tools |
+| Documents / Images | `.pdf`, `.md`, `.txt`, `.csv`, `.png`, `.jpg`, `.svg` | MCP resources |
 
-- Live tool catalog with state, risk level, and descriptions
-- Audit log viewer with filtering
-- Server status and health monitoring
-
-## Configuration
-
-All settings live in `foldermcp.yaml` at the workspace root. Run `foldermcp init` to generate one with defaults.
-
-```yaml
-version: 1
-
-scan:
-  include: ["*.py", "*.ts", "*.js", "*.yaml", "*.yml", "*.sh"]
-  exclude: ["tests/**", "node_modules/**", ".git/**"]
-
-tools:
-  # Per-tool overrides
-  # my_tool:
-  #   state: "enabled"
-  #   description: "Custom description"
-  #   risk: "high"
-
-dependencies:
-  python: []   # e.g., [requests, flask]
-  node: []     # e.g., [express, typescript]
-
-tool_routing:
-  max_tools_per_context: 20
-  strategy: "profile"
-  profiles:
-    # read_only: [query_db, list_files]
-    # admin: [delete_records, deploy_to_prod]
-```
+Key commands: `init`, `review`, `serve`, `connect`, `catalog`, `status`, `test`, `diff`, `doctor`,
+`deploy`, `export`, `logs`, `ui`, `completion`. All support the `--json` global flag. Run
+`foldermcp <command> --help` for flags, and `foldermcp ui` for the local Developer Studio dashboard.
 
 ## Security
 
-FolderMCP follows a deny-by-default security model:
+FolderMCP follows a deny-by-default model. For the v0.1 tool server, every tool starts `pending` and
+must be explicitly approved; execution is sandboxed in isolated subprocesses with timeouts and output
+limits; output is scanned to redact AWS keys, GitHub tokens, API keys, and private keys; every
+invocation is recorded in a structured audit log. The v3 indexer is read-only with respect to your
+files and never executes them. See [SECURITY.md](SECURITY.md) for the full model and how to report
+vulnerabilities.
 
-- All tools start in `pending` state and must be explicitly approved before invocation.
-- Execution is sandboxed in isolated subprocesses with configurable timeouts and output limits.
-- Output sanitization automatically redacts AWS keys, GitHub tokens, API keys, and private keys.
-- Per-tool risk labeling: `read_only`, `side_effects`, `destructive`, `network`.
-- Structured audit logging with JSON rotation for every invocation.
-
-For details on reporting vulnerabilities and the full security model, see [SECURITY.md](SECURITY.md).
-
-## Project Structure
+## Project structure
 
 ```
-cmd/foldermcp/       CLI entry point (15 commands)
+cmd/foldermcp/       CLI entry point (v0.1 commands + the -v3 subcommands)
 internal/
-  audit/             Structured JSON audit logging with rotation
-  cache/             Content-addressed source file cache
-  config/            YAML configuration with schema versioning
-  deps/              Dependency manager (uv for Python, npm for JS)
-  export/            A2A agent-card.json export
-  introspect/        Tool introspectors (Python, TS/JS, OpenAPI, Shell, Resources)
-  lifecycle/         State transition validation
-  pythonrt/          Shared Python runtime detection
-  sandbox/           Sandboxed executor with rate limiting and path guard
-  server/            MCP server (stdio + HTTP), auth, TLS, health/metrics
-  state/             SQLite state store
-  studio/            Developer web dashboard
-  watcher/           Polling file watcher (NAS-compatible)
-  workspace/         NAS split-storage manager, FS detection, shared approvals
-examples/            Sample projects (Python, OpenAPI, Shell)
+  v3/                v3 semantic-retrieval engine
+    walker/          file enumeration, hashing, content classification
+    chunker/         code-aware (tree-sitter) + recursive prose chunking
+    embed/           ONNX embedding, BERT tokenizer, int8 quantization
+    store/           SQLite schema, FTS5, sqlite-vec, migrations, fingerprint
+    pipeline/        four-pass indexer orchestration
+    grpc/            query server (search, inspect, browse) + admin
+    mcp/             MCP stdio shim and tool routing
+    transport/       Unix socket / Windows named pipe IPC
+  audit/ cache/ config/ deps/ introspect/ lifecycle/ pythonrt/
+  sandbox/ server/ state/ studio/ watcher/ workspace/   (v0.1 tool server)
+examples/            sample projects (Python, OpenAPI, Shell)
 ```
 
 ## Contributing
 
-Contributions are welcome. Please open an issue to discuss non-trivial changes
-before submitting a pull request.
+Contributions are welcome. Please open an issue to discuss non-trivial changes before submitting a
+pull request.
 
 1. Fork the repository.
 2. Create a feature branch from `main`.
 3. Add tests for new functionality.
-4. Run `make test` and `make lint` before submitting.
+4. Run `make test` and `make lint` (or `make v3-test` / `make v3-lint` for v3 work) before submitting.
 5. Open a pull request with a clear description of the change.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
