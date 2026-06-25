@@ -32,9 +32,19 @@ func (h *ChunksHandler) Get(ctx context.Context, req *pb.GetChunksRequest) (*pb.
 		placeholders = append(placeholders, '?')
 	}
 
+	// FIX 1a: join nodes + files and filter BOTH n.deleted_at AND f.deleted_at, not
+	// only c.deleted_at. Soft-delete (A6 watch reconcile) sets ONLY files.deleted_at
+	// — the chunk's own deleted_at stays NULL until the hard purge — so filtering
+	// c.deleted_at alone lets a client holding chunk IDs re-fetch a soft-deleted
+	// file's TEXT for up to one reconcile interval. Joining through nodes to files
+	// closes that egress path uniformly with hydrateNodes/GetNodes.
 	q := fmt.Sprintf(`
-SELECT chunk_id, text, token_count, chunk_kind
-FROM chunks WHERE chunk_id IN (%s) AND deleted_at IS NULL`, placeholders)
+SELECT c.chunk_id, c.text, c.token_count, c.chunk_kind
+FROM chunks c
+JOIN nodes n ON n.node_id = c.node_id
+JOIN files f ON f.file_id = n.file_id
+WHERE c.chunk_id IN (%s)
+  AND c.deleted_at IS NULL AND n.deleted_at IS NULL AND f.deleted_at IS NULL`, placeholders)
 
 	rows, err := h.DB.QueryContext(ctx, q, args...)
 	if err != nil {

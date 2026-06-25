@@ -12,7 +12,19 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// hydrateNodes fills HydratedNode on each ScoredNode per the hint.
+// hydrateNodes fills HydratedNode on each ScoredNode per the hint. It is the
+// shared egress choke point for the vector and FTS search paths (both call it),
+// so its WHERE clause is where soft-deleted exclusion is enforced once for both.
+//
+// FIX 2: the WHERE clause filters BOTH n.deleted_at IS NULL AND f.deleted_at IS
+// NULL. A6 watch reconcile soft-deletes a dropped file (sets files.deleted_at) and
+// hard-purges only at the NEXT reconcile; in between, the file's NODE rows still
+// have deleted_at NULL. Filtering only n.deleted_at would leave such a node
+// hydratable (path/name/chunks leaked) for up to one reconcile interval. Adding
+// f.deleted_at IS NULL excludes it IMMEDIATELY the instant reconcile flags the
+// file. A node whose file is soft-deleted simply does not land in nodeByID, so its
+// ScoredNode keeps a nil Hydrated and fetchTopChunks is never called for it (no
+// chunk content can escape via the chunk path either).
 func hydrateNodes(ctx context.Context, db *sql.DB, scored []*pb.ScoredNode, hint *pb.HydrationHint) error {
 	if len(scored) == 0 {
 		return nil
@@ -31,7 +43,7 @@ SELECT n.node_id, n.file_id, f.path, n.node_type, n.name, f.content_class,
        COALESCE(n.language,''), n.provenance, COALESCE(n.confidence, 0.0),
        n.properties
 FROM nodes n JOIN files f ON f.file_id = n.file_id
-WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
+WHERE n.node_id IN (%s) AND n.deleted_at IS NULL AND f.deleted_at IS NULL`, placeholders)
 	rows, err := db.QueryContext(ctx, q, ids...)
 	if err != nil {
 		return status.Errorf(codes.Internal, "hydrate query: %v", err)
@@ -78,10 +90,20 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 }
 
 func fetchTopChunks(ctx context.Context, db *sql.DB, nodeID int64, limit int) ([]*pb.HydratedChunk, error) {
+	// FIX 1c: join nodes + files and filter n.deleted_at/f.deleted_at here too, for
+	// defense-in-depth uniformity. Current callers (hydrateNodes, GetNodes) already
+	// pre-filter the node by file, so this is redundant for them — but it makes the
+	// chunk-egress invariant hold AT THIS PATH regardless of caller, so a future
+	// caller that fetches chunks for a soft-deleted file's node cannot reintroduce
+	// the leak. soft-delete sets ONLY files.deleted_at, hence the f.deleted_at term.
 	rows, err := db.QueryContext(ctx, `
-SELECT chunk_id, text, token_count, chunk_kind
-FROM chunks WHERE node_id=? AND deleted_at IS NULL
-ORDER BY chunk_id LIMIT ?`, nodeID, limit)
+SELECT c.chunk_id, c.text, c.token_count, c.chunk_kind
+FROM chunks c
+JOIN nodes n ON n.node_id = c.node_id
+JOIN files f ON f.file_id = n.file_id
+WHERE c.node_id=?
+  AND c.deleted_at IS NULL AND n.deleted_at IS NULL AND f.deleted_at IS NULL
+ORDER BY c.chunk_id LIMIT ?`, nodeID, limit)
 	if err != nil {
 		return nil, err
 	}

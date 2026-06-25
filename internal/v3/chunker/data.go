@@ -86,7 +86,11 @@ func ChunkData(path, title, ext string, cfg Config, counter Counter) ([]DataChun
 		return nil, stats, fmt.Errorf("data parse %s: %w", path, ErrDataFallback)
 	}
 	if len(lines) == 0 {
-		return nil, stats, fmt.Errorf("data empty %s: %w", path, ErrDataFallback)
+		// The document PARSED cleanly but has zero leaves — a valid empty
+		// structure ({} / [] / an empty mapping), NOT malformed. Return the
+		// ErrDataEmpty subset so the runner labels it "empty_structure" rather
+		// than lumping a well-formed empty config in with malformed files (FIX 3).
+		return nil, stats, fmt.Errorf("data empty %s: %w", path, ErrDataEmpty)
 	}
 
 	// Build the outline text: one "path: value" line per leaf. The whole outline

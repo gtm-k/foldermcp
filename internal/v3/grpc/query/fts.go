@@ -42,11 +42,21 @@ func (h *FTSHandler) Search(ctx context.Context, req *pb.FTSSearchRequest) (*pb.
 
 	// FTS5 BM25: bm25() returns negative values where lower (more negative)
 	// means better match. Negating produces a positive score where higher = better.
+	//
+	// FIX 1b: join through nodes to files and filter n.deleted_at/f.deleted_at in the
+	// candidate selection BEFORE the LIMIT k. Soft-delete sets ONLY files.deleted_at
+	// (chunk/node deleted_at stay NULL until the hard purge), so without this filter a
+	// soft-deleted file's chunks rank into the top-K, consume result slots, and crowd
+	// out live hits — hydrateNodes then drops their content but the wasted slot makes
+	// the window short. Filtering here keeps soft-deleted files out of the top-K.
 	rows, err := h.DB.QueryContext(ctx, `
 SELECT c.chunk_id, c.node_id, -bm25(chunks_fts) AS score
 FROM chunks_fts
 JOIN chunks c ON c.chunk_id = chunks_fts.rowid
+JOIN nodes n ON n.node_id = c.node_id
+JOIN files f ON f.file_id = n.file_id
 WHERE chunks_fts MATCH ?
+  AND c.deleted_at IS NULL AND n.deleted_at IS NULL AND f.deleted_at IS NULL
 ORDER BY score DESC
 LIMIT ?`, match, k)
 	if err != nil {

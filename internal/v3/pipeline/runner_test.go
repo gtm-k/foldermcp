@@ -1141,3 +1141,109 @@ func TestRunner_BinaryDataPast8KBSkipped(t *testing.T) {
 		t.Errorf("late-binary .json produced %d chunks, want 0", got)
 	}
 }
+
+// TestRunner_EmptyStructureFallbackLabeledNotMalformed (integration FIX 3): a
+// well-formed but EMPTY JSON object "{}" flattens to zero outline lines, so the
+// structure-aware chunker declines (ErrDataEmpty ⊂ ErrDataFallback) and the file
+// is prose-chunked. The AMBIGUOUS fallback node MUST carry
+// fallback_reason="empty_structure" — NOT "malformed" — because a valid empty
+// config is not malformed; mislabeling it would hide genuinely malformed files in
+// the same bucket. Also verifies the A5 LOW gap: the fallback node properties
+// carry data_stats (the degraded path still records the extractor stats).
+func TestRunner_EmptyStructureFallbackLabeledNotMalformed(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{
+		"empty.json": "{}", // valid empty object — non-empty text, indexes via prose fallback
+	})
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	id := fileIDByPathSuffix(t, db, "empty.json")
+	// The file indexes (prose fallback) and the node is AMBIGUOUS.
+	var provenance, props string
+	if err := db.QueryRow(`SELECT provenance, properties FROM nodes WHERE file_id=?`, id).Scan(&provenance, &props); err != nil {
+		t.Fatalf("node row: %v", err)
+	}
+	if provenance != "AMBIGUOUS" {
+		t.Errorf("provenance = %q, want AMBIGUOUS (prose fallback)", provenance)
+	}
+	if !strings.Contains(props, `"fallback_reason":"empty_structure"`) {
+		t.Errorf("properties = %s, want fallback_reason=empty_structure (NOT malformed — a valid empty {} is not malformed)", props)
+	}
+	if strings.Contains(props, `"fallback_reason":"malformed"`) {
+		t.Errorf("properties = %s, a valid empty {} must NOT be labeled malformed", props)
+	}
+	// A5 LOW gap: the degraded path still records the extractor stats.
+	if !strings.Contains(props, `"data_stats"`) {
+		t.Errorf("properties = %s, want data_stats present on the fallback node", props)
+	}
+	// And it actually indexed (embeddings done, non-zero chunks).
+	if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, id); got != 1 {
+		t.Errorf("empty.json {} embeddings done = %d, want 1 (must still index)", got)
+	}
+}
+
+// TestRunner_EmptyTextFileSkipped (integration FIX 1, CRITICAL): the zero-chunk-
+// done hole on the PLAIN CODE/PROSE path. A .go/.md/.txt edited to empty (or
+// whitespace-only) classifies as code/document, flows runStructural → runChunker →
+// ChunkProse("") → ZERO chunks, and (pre-fix) was marked embeddings=done with zero
+// chunks: silently unsearchable AND dropped from PendingFiles forever. A watch
+// re-index of a file truncated to empty hits this immediately. The fix mirrors the
+// data path's markDataSkipped: status=skipped, error_message="empty_content", zero
+// chunks, NOT embeddings=done. A normal non-empty .go is the control and must still
+// fully index.
+func TestRunner_EmptyTextFileSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{
+		"empty.go":   "",          // 0-byte Go source (code class, go extractor, zero symbols)
+		"blank.md":   "   \n\t\n", // whitespace-only Markdown (document/prose class)
+		"empty.txt":  "",          // 0-byte plain text
+		"present.go": goFixture,   // control: a real .go must still index
+	})
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, suffix := range []string{"empty.go", "blank.md", "empty.txt"} {
+		id := fileIDByPathSuffix(t, db, suffix)
+		for _, pass := range []string{"structural", "chunker", "embeddings"} {
+			var status, msg string
+			if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, id, pass).Scan(&status, &msg); err != nil {
+				t.Fatalf("%s %s row: %v", suffix, pass, err)
+			}
+			if status != "skipped" || msg != "empty_content" {
+				t.Errorf("%s %s = (%q,%q), want (skipped, empty_content)", suffix, pass, status, msg)
+			}
+		}
+		// ZERO chunks — and crucially NOT embeddings=done-with-zero-chunks.
+		if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, id); got != 0 {
+			t.Errorf("%s produced %d chunks, want 0", suffix, got)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, id); got != 0 {
+			t.Errorf("%s embeddings marked done despite zero chunks (FIX 1 silent done-with-zero-chunks)", suffix)
+		}
+		// FIX 2 (symmetry with the data path): the empty-text early-exit fires BEFORE
+		// runStructural inserts a file node, so NO stranded node row may exist. A
+		// stranded node would be returned by metadata/filename search (with zero
+		// chunks), leaking a phantom result for an emptied file.
+		if got := count(t, db, `SELECT COUNT(*) FROM nodes WHERE file_id=?`, id); got != 0 {
+			t.Errorf("%s left %d stranded node row(s), want 0 (FIX 2: skip before node insert)", suffix, got)
+		}
+	}
+
+	// Control: a normal non-empty .go must reach embeddings=done with chunks.
+	presentID := fileIDByPathSuffix(t, db, "present.go")
+	var pStatus string
+	if err := db.QueryRow(`SELECT status FROM pipeline_state WHERE file_id=? AND pass_name='embeddings'`, presentID).Scan(&pStatus); err != nil {
+		t.Fatalf("present.go embeddings row: %v", err)
+	}
+	if pStatus != "done" {
+		t.Errorf("present.go embeddings = %q, want done (a non-empty .go must still index)", pStatus)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, presentID); got == 0 {
+		t.Error("present.go produced zero chunks — FIX 1 must not skip a non-empty file")
+	}
+}
