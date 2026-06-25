@@ -7,8 +7,8 @@
 
 **Turn any folder into a private, local-first semantic index your AI assistant can search — nothing leaves your machine.**
 
-Point FolderMCP at a folder of code, docs, PDFs, and notes. It reads everything once,
-builds a "search brain" in a **single file on your own disk**, and serves it to AI tools
+Point FolderMCP at a folder of source code, Markdown, and text files. It reads them once,
+builds a "search brain" in a **SQLite database on your own disk**, and serves it to AI tools
 (Claude, Cursor, VS Code, …) through [MCP (Model Context Protocol)](https://modelcontextprotocol.io).
 Your assistant can then find the right piece by **meaning**, not just keywords — even when the
 folder lives on a shared network drive, and **without uploading a single byte to the cloud**.
@@ -43,17 +43,16 @@ flowchart TB
 ```
 
 The indexer and query server are split so a long indexing run never blocks an interactive search,
-and the query server can open the database read-only. Everything — text, keyword index, and
-meaning-vectors — lives in **one transactional SQLite file**, so there is no second database to keep
-in sync and nothing to copy but a single file.
+and the query server can open the database read-only. Text, keyword index, and meaning-vectors all live in **one transactional SQLite
+database**, so there is no second store — no separate vector database — to keep in sync.
 
 ## Why FolderMCP
 
 - **Local-first and private.** Every byte stays on your machine. No cloud account, no upload, no per-query cost.
 - **Hybrid retrieval.** Keyword (FTS5/BM25), filename, and semantic vector search run in parallel and fuse with Reciprocal Rank Fusion — more robust than any single channel.
-- **One file holds everything.** Metadata, keyword index, and vectors live in a single SQLite database. Back it up or move it by copying one file; no server to run.
-- **Works on network drives.** SMB, NFS, and NAS mounts are first-class. A polling-by-hash watcher keeps the index fresh where OS file events are unreliable.
-- **Cross-platform and self-contained.** Native Windows, macOS, and Linux. The SQLite engine, vector math, and embedding runtime are compiled in or shipped beside the binary — no Python, no Docker, no toolchain for end users.
+- **One database holds everything.** Metadata, keyword index, and vectors live in a single SQLite database — no separate vector store to keep in sync, no server to run.
+- **Works on network drives.** SMB, NFS, and NAS mounts are first-class; re-running the indexer re-processes only the files whose contents changed (compared by hash).
+- **Cross-platform.** Native Windows, macOS, and Linux — Go, with the SQLite engine, vector math, and embedding runtime compiled in or shipped beside the binary (no Python, no Docker). v3 builds from source today; a self-contained Windows bundle ships via `make v3-package-windows`, with a full native release matrix planned.
 - **MCP-native.** Three tools — `search`, `inspect`, `browse` — that any MCP client already understands. No custom integration.
 
 ## Quick start (v3)
@@ -67,14 +66,14 @@ tree-sitter via cgo). Self-contained prebuilt bundles are produced by `make v3-p
 make v3-fetch-model
 
 # 2. Build the v3 binary (cgo + SQLite FTS5)
-make v3-build                      # -> build/foldermcp-v3
+make v3-build                      # -> bin/foldermcp-v3
 
 # 3. Index a folder (writes the index to $FOLDERMCP_STORE)
 export FOLDERMCP_STORE=~/.foldermcp/index
-./build/foldermcp-v3 index-v3 ./my-folder
+./bin/foldermcp-v3 index-v3 ./my-folder
 
 # 4. Try a search from the CLI
-./build/foldermcp-v3 search-v3 "how is config loaded?"
+./bin/foldermcp-v3 search-v3 "how is config loaded?"
 ```
 
 To use it from an AI client, point the client's MCP config at `foldermcp-v3 mcp-v3` (the shim the
@@ -84,8 +83,8 @@ server together in one process. Run any command with `--help` for its flags.
 ## Indexing pipeline
 
 `index-v3` turns raw files into a searchable index through a **four-pass pipeline**, each pass with
-one job. Binary and media files are detected and skipped rather than chunked as garbage; only text
-and code are indexed.
+one job. Binary and media files are detected and skipped rather than chunked as garbage; today only
+text and code are indexed (PDF and Office document text extraction is planned).
 
 ```mermaid
 flowchart TB
@@ -121,7 +120,7 @@ flowchart LR
     K --> R{{RRF fusion}}
     N --> R
     V --> R
-    R --> OUT[One ranked list<br/>files + snippets<br/>+ graph expand]
+    R --> OUT[One ranked list<br/>files + snippets]
 ```
 
 Each channel is blind to what the others catch: keyword search nails exact terms and names, filename
@@ -137,7 +136,7 @@ channel (`lexical`, `semantic`, `filename`) or blends all of them (`auto`, the d
 | `foldermcp serve-v3` | Run the read-only gRPC query server against an existing index. |
 | `foldermcp mcp-v3` | Run the MCP stdio shim (launched by your AI client per session). |
 | `foldermcp search-v3 <query>` | Search the index (hybrid lexical + semantic) and print ranked matches. |
-| `foldermcp auth-v3 init \| rotate` | Manage the gRPC auth token and self-signed TLS certificate. |
+| `foldermcp auth-v3 init \| rotate` | Generate/rotate the gRPC auth token and self-signed TLS certificate. |
 
 Environment: `FOLDERMCP_STORE` (where the index lives), `FOLDERMCP_MODEL_DIR` (embedding model
 directory), `FOLDERMCP_ORT_LIB` (ONNX Runtime library). A self-contained bundle resolves the model and
