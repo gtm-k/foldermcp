@@ -48,6 +48,10 @@ FROM chunks WHERE chunk_id IN (%s) AND deleted_at IS NULL`, placeholders)
 		if err := rows.Scan(&c.ChunkId, &c.Text, &c.TokenCount, &c.ChunkKind); err != nil {
 			return nil, status.Errorf(codes.Internal, "get_chunks scan: %v", err)
 		}
+		// MED-3: GetChunks is a low-level IndexQuery RPC that previously returned
+		// RAW text — a same-user client could retrieve a pre-Phase-7 (un-ingest-
+		// redacted) secret. Apply the shared egress redaction here too.
+		redactHydratedChunk(c)
 		resp.Chunks = append(resp.Chunks, c)
 	}
 	if err := rows.Err(); err != nil {

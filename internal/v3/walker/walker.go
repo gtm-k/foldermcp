@@ -16,6 +16,38 @@ type Options struct {
 	Root        string
 	IgnoreGlobs []string // gitignore-style filename globs
 	BatchSize   int
+	// IncludeSecrets disables the default-on secret-hygiene deny list
+	// (secretDenyGlobs). Default false: credential-bearing files
+	// (.env*, *.pem, *.key, id_rsa*, *.p12, *.pfx, *credentials*, *.keystore)
+	// never enter the files table — a matched file is never indexed, so its
+	// secret is unfindable (Phase 7 Layer 1, D17). Explicit config may set this
+	// true to opt back in.
+	IncludeSecrets bool
+}
+
+// secretDenyGlobs are filename patterns that, by default, are excluded from the
+// walk so credential-bearing files never enter the index (Phase 7 Layer 1, D17).
+// .git is already excluded as a directory (shouldIgnoreDir). Overridable via
+// Options.IncludeSecrets.
+var secretDenyGlobs = []string{
+	".env", ".env.*", "*.env",
+	"*.pem", "*.key", "id_rsa", "id_rsa.*",
+	"*.p12", "*.pfx", "*credentials*", "*.keystore",
+}
+
+// matchesSecretDeny reports whether name matches any default secret-deny glob.
+func matchesSecretDeny(name string) bool {
+	lower := strings.ToLower(name)
+	for _, g := range secretDenyGlobs {
+		// LOW-7: fail CLOSED on a malformed pattern. filepath.Match only errors on
+		// a bad PATTERN (ErrBadPattern), never on the name, so an error means our
+		// own deny glob is broken — treat that as a match and exclude the file
+		// rather than indexing a credential-bearing file because the guard threw.
+		if ok, err := filepath.Match(g, lower); err != nil || ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Walk enumerates Root and upserts one row per file into the files table.
@@ -76,6 +108,11 @@ ON CONFLICT(path) DO UPDATE SET
 			if shouldIgnoreDir(d.Name()) {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		// Layer 1 secret hygiene (D17): default-deny credential-bearing files so
+		// they never enter the files table — overridable by IncludeSecrets.
+		if !opts.IncludeSecrets && matchesSecretDeny(d.Name()) {
 			return nil
 		}
 		if skipFile(d.Name(), opts.IgnoreGlobs) {

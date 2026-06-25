@@ -67,6 +67,13 @@ func (s *Sanitizer) SanitizeParams(params string) string {
 	return result
 }
 
+// RedactSecrets applies only the known secret patterns (NO long-token
+// heuristic) to input, returning the redacted string. Exported per D17 for
+// the v3 ingest redaction hook: pattern-only redaction is safe to run before
+// FTS/embeddings, whereas Sanitize's 40+-char long-token rule would destroy
+// git SHAs, content hashes, and base64 literals in indexed corpora.
+func RedactSecrets(input string) string { return redactSecrets(input) }
+
 // redactSecrets applies all secret patterns to the input string.
 func redactSecrets(input string) string {
 	result := input

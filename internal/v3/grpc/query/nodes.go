@@ -52,6 +52,12 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL`, placeholders)
 			&n.ContentClass, &n.Language, &n.Provenance, &n.Confidence, &n.PropertiesJson); err != nil {
 			return nil, status.Errorf(codes.Internal, "get_nodes scan: %v", err)
 		}
+		// MED-3 / F1: GetNodes is a low-level IndexQuery RPC that previously
+		// returned a RAW PropertiesJson — which can carry a secret in a Go symbol
+		// signature. Redact STRUCTURALLY so the egressed value stays valid JSON
+		// (flat-text redaction would consume the closing quote/brace). Hydrated
+		// chunks (below) are flat text, redacted in fetchTopChunks.
+		n.PropertiesJson = redactPropertiesJSON(n.PropertiesJson, "node_id", n.NodeId)
 		resp.Nodes = append(resp.Nodes, n)
 	}
 

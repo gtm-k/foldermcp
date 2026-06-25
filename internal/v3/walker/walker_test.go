@@ -11,6 +11,21 @@ import (
 	"github.com/gtm-k/foldermcp/internal/v3/store"
 )
 
+// TestMatchesSecretDeny_FailsClosedOnBadPattern (LOW-7): filepath.Match returns
+// ErrBadPattern on a malformed glob. matchesSecretDeny must treat that error as a
+// MATCH (fail closed) so a credential-bearing file is never indexed because the
+// guard's own pattern is broken — rather than the previous `if ok, _ := ...; ok`
+// which failed OPEN (indexed the file).
+func TestMatchesSecretDeny_FailsClosedOnBadPattern(t *testing.T) {
+	orig := secretDenyGlobs
+	t.Cleanup(func() { secretDenyGlobs = orig })
+	// "[" is an unterminated character class — filepath.Match returns ErrBadPattern.
+	secretDenyGlobs = []string{"["}
+	if !matchesSecretDeny("anything.txt") {
+		t.Error("matchesSecretDeny returned false on a malformed glob — must fail CLOSED (exclude the file)")
+	}
+}
+
 func TestWalkerUpsertsFiles(t *testing.T) {
 	walkRoot := t.TempDir()
 	dbDir := t.TempDir() // separate dir for DB to avoid walking WAL/SHM files
