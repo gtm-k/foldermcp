@@ -86,6 +86,13 @@ LIMIT ?`, req.QueryEmbeddingInt8, 2*k, k)
 	}
 	defer func() { _ = rows.Close() }()
 
+	// FINDING 1 (retrieval quality): the KNN matches at the CHUNK level but ScoredNode
+	// only carries node_id. Capture, per node, the best-scoring matched chunk_id (rows
+	// are ordered by distance ASC, so the FIRST row for a node is its closest chunk) and
+	// thread it INTERNALLY into hydration so the matched chunk — e.g. page 50 of a PDF
+	// node — is hydrated and surfaced as the snippet, not the title-page Chunks[0]. No
+	// proto field is added; the map never leaves this package.
+	matchedChunks := make(map[int64]int64)
 	for rows.Next() {
 		var chunkID, nodeID int64
 		var distance float64
@@ -94,10 +101,14 @@ LIMIT ?`, req.QueryEmbeddingInt8, 2*k, k)
 		}
 		// Convert distance (lower=closer) to score (higher=better).
 		score := float32(1.0 / (1.0 + distance))
-		resp.Results = append(resp.Results, &pb.ScoredNode{
-			NodeId: nodeID,
-			Score:  score,
-		})
+		if _, seen := matchedChunks[nodeID]; !seen {
+			// First (closest) row for this node = its best matched chunk.
+			matchedChunks[nodeID] = chunkID
+			resp.Results = append(resp.Results, &pb.ScoredNode{
+				NodeId: nodeID,
+				Score:  score,
+			})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		resp.Status.Status = "DEGRADED"
@@ -107,7 +118,7 @@ LIMIT ?`, req.QueryEmbeddingInt8, 2*k, k)
 	}
 
 	if req.Hydrate != nil {
-		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate); err != nil {
+		if err := hydrateNodes(ctx, h.DB, resp.Results, req.Hydrate, matchedChunks); err != nil {
 			return nil, status.Errorf(codes.Internal, "hydrate: %v", err)
 		}
 	}

@@ -73,7 +73,7 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL AND f.deleted_at IS NULL`, plac
 			chunksPerNode = 2
 		}
 		for _, n := range resp.Nodes {
-			chunks, err := fetchTopChunks(ctx, h.DB, n.NodeId, chunksPerNode)
+			chunks, err := fetchTopChunks(ctx, h.DB, n.NodeId, chunksPerNode, 0)
 			if err != nil {
 				return nil, status.Errorf(codes.Internal, "get_nodes hydrate: %v", err)
 			}

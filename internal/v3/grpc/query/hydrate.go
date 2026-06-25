@@ -25,7 +25,17 @@ import (
 // file. A node whose file is soft-deleted simply does not land in nodeByID, so its
 // ScoredNode keeps a nil Hydrated and fetchTopChunks is never called for it (no
 // chunk content can escape via the chunk path either).
-func hydrateNodes(ctx context.Context, db *sql.DB, scored []*pb.ScoredNode, hint *pb.HydrationHint) error {
+// hydrateNodes fills HydratedNode on each ScoredNode per the hint.
+//
+// FINDING 1 (retrieval quality): matchedChunks maps node_id -> the best-scoring chunk_id
+// that the chunk-level source (vector/FTS) actually matched for that node. A4/A5 made a
+// whole PDF/DOCX/CSV ONE node holding MANY chunks, so a query matching chunk #50 of a
+// 200-chunk node must SHOW chunk #50 — not Chunks[0] (the title page / CSV schema header,
+// which is what LIMIT chunksPerNode ORDER BY chunk_id returns). When a node has a matched
+// chunk_id (>0), fetchTopChunks fetches THAT chunk first plus neighbors, so it is both
+// included and Chunks[0] (the snippet source). matchedChunks may be nil (filename/metadata/
+// GetNodes paths have no chunk-level match) — those keep the M1 Chunks[0] behaviour.
+func hydrateNodes(ctx context.Context, db *sql.DB, scored []*pb.ScoredNode, hint *pb.HydrationHint, matchedChunks map[int64]int64) error {
 	if len(scored) == 0 {
 		return nil
 	}
@@ -74,7 +84,7 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL AND f.deleted_at IS NULL`, plac
 	}
 	if hint.Chunks {
 		for id, h := range nodeByID {
-			chunks, err := fetchTopChunks(ctx, db, id, chunksPerNode)
+			chunks, err := fetchTopChunks(ctx, db, id, chunksPerNode, matchedChunks[id])
 			if err != nil {
 				return err
 			}
@@ -89,7 +99,23 @@ WHERE n.node_id IN (%s) AND n.deleted_at IS NULL AND f.deleted_at IS NULL`, plac
 	return nil
 }
 
-func fetchTopChunks(ctx context.Context, db *sql.DB, nodeID int64, limit int) ([]*pb.HydratedChunk, error) {
+// fetchTopChunks returns up to `limit` chunks for a node.
+//
+// FINDING 1 (retrieval quality): when matchedChunkID > 0, the matched chunk is INCLUDED
+// and placed FIRST, then up to limit-1 neighbours fill the rest (ORDER BY chunk_id). This
+// guarantees a query matching chunk #50 of a 200-chunk document node both hydrates chunk
+// #50 and surfaces it as Chunks[0] (the snippet source), instead of being truncated away
+// by `LIMIT limit ORDER BY chunk_id` — which would only ever return the title page /
+// schema header. When matchedChunkID == 0 (filename/metadata/GetNodes — no chunk-level
+// match), the original ORDER BY chunk_id LIMIT behaviour is preserved exactly.
+//
+// FIX 1c invariant preserved: the chunks query joins nodes + files and filters
+// c/n/f.deleted_at on EVERY branch, so the soft-deleted-file egress filter holds at this
+// path regardless of caller.
+func fetchTopChunks(ctx context.Context, db *sql.DB, nodeID int64, limit int, matchedChunkID int64) ([]*pb.HydratedChunk, error) {
+	if matchedChunkID > 0 {
+		return fetchTopChunksWithMatch(ctx, db, nodeID, limit, matchedChunkID)
+	}
 	// FIX 1c: join nodes + files and filter n.deleted_at/f.deleted_at here too, for
 	// defense-in-depth uniformity. Current callers (hydrateNodes, GetNodes) already
 	// pre-filter the node by file, so this is redundant for them — but it makes the
@@ -117,6 +143,58 @@ ORDER BY c.chunk_id LIMIT ?`, nodeID, limit)
 		// MED-3: shared egress choke point — every chunk hydrated here (tools-layer
 		// SearchBroadly/Inspect AND IndexQuery GetNodes-with-hydrate) inherits
 		// egress redaction.
+		redactHydratedChunk(c)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// fetchTopChunksWithMatch fetches the matched chunk FIRST, then up to limit-1 neighbour
+// chunks for context (ORDER BY chunk_id), de-duplicating the matched chunk if it also
+// falls in the neighbour window. It carries the SAME c/n/f.deleted_at egress filter as
+// fetchTopChunks (a soft-deleted file's chunk — incl. the "matched" one — is never
+// returned), and applies the same redactHydratedChunk egress redaction.
+func fetchTopChunksWithMatch(ctx context.Context, db *sql.DB, nodeID int64, limit int, matchedChunkID int64) ([]*pb.HydratedChunk, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	// The matched chunk is returned first (rank 0); the remaining limit-1 slots are the
+	// node's lowest-chunk_id chunks for stable context, matching the prior ORDER BY
+	// chunk_id window. UNION + the outer ORDER BY rank keeps the matched chunk at the
+	// head; the per-row deleted_at filter is identical on both legs.
+	const q = `
+SELECT chunk_id, text, token_count, chunk_kind, rank FROM (
+  SELECT c.chunk_id AS chunk_id, c.text AS text, c.token_count AS token_count,
+         c.chunk_kind AS chunk_kind, 0 AS rank
+  FROM chunks c
+  JOIN nodes n ON n.node_id = c.node_id
+  JOIN files f ON f.file_id = n.file_id
+  WHERE c.node_id=? AND c.chunk_id=?
+    AND c.deleted_at IS NULL AND n.deleted_at IS NULL AND f.deleted_at IS NULL
+  UNION
+  SELECT c.chunk_id AS chunk_id, c.text AS text, c.token_count AS token_count,
+         c.chunk_kind AS chunk_kind, 1 AS rank
+  FROM chunks c
+  JOIN nodes n ON n.node_id = c.node_id
+  JOIN files f ON f.file_id = n.file_id
+  WHERE c.node_id=? AND c.chunk_id<>?
+    AND c.deleted_at IS NULL AND n.deleted_at IS NULL AND f.deleted_at IS NULL
+  ORDER BY rank, chunk_id
+  LIMIT ?
+)
+ORDER BY rank, chunk_id`
+	rows, err := db.QueryContext(ctx, q, nodeID, matchedChunkID, nodeID, matchedChunkID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*pb.HydratedChunk
+	for rows.Next() {
+		c := &pb.HydratedChunk{}
+		var rank int
+		if err := rows.Scan(&c.ChunkId, &c.Text, &c.TokenCount, &c.ChunkKind, &rank); err != nil {
+			return nil, err
+		}
 		redactHydratedChunk(c)
 		out = append(out, c)
 	}
