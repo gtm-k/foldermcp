@@ -1,0 +1,67 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 4 0 R ] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>
+endobj
+5 0 obj
+<< /Length 591 >>
+stream
+BT
+/F1 12 Tf
+72 720 Td
+14 TL
+(FolderMCP PDF extraction fixture page one introduces the document.) Tj T*
+(This paragraph mentions quasar telemetry as a unique probe phrase and) Tj T*
+(then continues with enough additional prose to comfortably exceed the) Tj T*
+(digital-native two-hundred-character-per-page extraction quality gate.) Tj T*
+() Tj T*
+(A second paragraph on page one adds more prose so the recursive splitter) Tj T*
+(has real material to anchor page and paragraph numbers against, and so) Tj T*
+(the page stays well above the minimum character threshold for indexing.) Tj T*
+ET
+endstream
+endobj
+6 0 obj
+<< /Length 511 >>
+stream
+BT
+/F1 12 Tf
+72 720 Td
+14 TL
+(Page two begins after the form feed boundary and opens a new section.) Tj T*
+(It discusses photosynthesis pipelines as another unique probe phrase,) Tj T*
+(continuing with sufficient prose to keep this page above the digital) Tj T*
+(native extraction quality threshold of two hundred characters per page.) Tj T*
+() Tj T*
+(A trailing paragraph on page two ensures multiple paragraphs exist so) Tj T*
+(the paragraph counter in the chunk header advances beyond one as well.) Tj T*
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000128 00000 n 
+0000000254 00000 n 
+0000000380 00000 n 
+0000001021 00000 n 
+0000001582 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1652
+%%EOF
