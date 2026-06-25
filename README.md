@@ -144,6 +144,59 @@ Environment: `FOLDERMCP_STORE` (where the index lives), `FOLDERMCP_MODEL_DIR` (e
 directory), `FOLDERMCP_ORT_LIB` (ONNX Runtime library). A self-contained bundle resolves the model and
 runtime sitting beside the binary, so those are optional there.
 
+### `search-v3` flags
+
+`search-v3` runs in-process against the local index (no running daemon required).
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | `auto` | Retrieval mode: `auto` (blend all), `lexical`, `semantic`, `filename`. |
+| `--detail` | `standard` | Detail level: `brief`, `standard`, `full`. |
+| `-k`, `--limit` | `10` | Maximum number of results. |
+| `--kind` | (none) | Filter results by kind: `code`, `prose`, `pdf`, `csv`. Best-effort by file extension (see note). |
+| `--path-prefix` | (none) | Only return results whose path begins with this prefix. |
+| `--json` | `false` | Emit machine-readable JSON instead of human text (root persistent flag). |
+
+`--kind` and `--path-prefix` are applied client-side after retrieval; result ranks are renumbered
+`1..N` so the surviving order stays gap-free.
+
+> **`--kind` is a heuristic.** The search response does not carry the indexer's true chunk kind, so
+> `--kind` filters on the result file's extension (`code` → `.go .py .ts .js .rs …`, `prose` →
+> `.md .txt .rst …`, `pdf` → `.pdf`, `csv` → `.csv`). It is a convenience filter, not an exact
+> chunk-kind selector.
+
+**Exit codes** (for scripting / CI): `0` = at least one match, `1` = zero matches, `2` = error
+(bad flag, no index, search failure).
+
+**`--json` output schema** — a stable object:
+
+```jsonc
+{
+  "query":        "how is config loaded?",
+  "status":       "ok",        // overall status
+  "completeness": "full",
+  "degraded_sources": ["vector"],   // omitted when none
+  "sources": [
+    { "name": "fts", "status": "OK", "latency_ms": 2 },
+    { "name": "vector", "status": "OK", "latency_ms": 15 }
+  ],
+  "results": [
+    {
+      "rank": 1,
+      "path": "/repo/config.go",
+      "title": "config",
+      "snippet": "type Config struct …",
+      "matched_sources": ["fts", "vector"]
+    }
+  ]
+}
+```
+
+There is deliberately **no `score` field**: the internal fusion (RRF) score is a positional artifact,
+not a relevance magnitude. The honest signals are the `rank` order and `matched_sources` (how many
+independent channels agreed). All `path`/`title`/`snippet` values are sanitized of terminal control
+characters, so crafted indexed content cannot inject escape sequences into your terminal or CI log.
+
 ## The stack
 
 | Layer | Choice | Why |
