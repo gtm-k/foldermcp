@@ -143,7 +143,10 @@ type cappedBuffer struct {
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
 	if c.overflow {
-		// Pretend to consume so the child's pipe never blocks; we will kill it.
+		// Pretend to consume so the child's pipe never blocks. Nothing kills
+		// pdftotext early on overflow — the overflow is surfaced as
+		// ErrExtractionOversize AFTER cmd.Run returns (see extractPDFText), and the
+		// 60s extractTimeout bounds the worst case if the child keeps producing.
 		return len(p), nil
 	}
 	remaining := c.limit - c.buf.Len()

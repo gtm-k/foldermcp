@@ -3,6 +3,9 @@
 package chunker
 
 import (
+	"archive/zip"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,7 +50,7 @@ func TestChunkOffice_DOCX_GoldenHeadersAndSpans(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "report.docx")
 	writeOfficeFixture(t, path, BuildDOCX, officeDocxParas)
 
-	chunks, stats, err := ChunkOffice(path, "report.docx", ".docx", DefaultConfig(), wordCounter{})
+	chunks, stats, err := ChunkOffice(context.Background(), path, "report.docx", ".docx", DefaultConfig(), wordCounter{})
 	if err != nil {
 		t.Fatalf("ChunkOffice docx: %v", err)
 	}
@@ -58,7 +61,7 @@ func TestChunkOffice_ODT_GoldenHeadersAndSpans(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memo.odt")
 	writeOfficeFixture(t, path, BuildODT, officeOdtParas)
 
-	chunks, stats, err := ChunkOffice(path, "memo.odt", ".odt", DefaultConfig(), wordCounter{})
+	chunks, stats, err := ChunkOffice(context.Background(), path, "memo.odt", ".odt", DefaultConfig(), wordCounter{})
 	if err != nil {
 		t.Fatalf("ChunkOffice odt: %v", err)
 	}
@@ -119,13 +122,13 @@ func TestChunkOffice_ReSliceReproducesText(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "doc.docx")
 	writeOfficeFixture(t, path, BuildDOCX, officeDocxParas)
 
-	paras, err := extractOfficeParagraphs(path, ".docx")
+	paras, err := extractOfficeParagraphs(context.Background(), path, ".docx")
 	if err != nil {
 		t.Fatalf("extractOfficeParagraphs: %v", err)
 	}
 	joined := strings.Join(paras, "\n\n")
 
-	chunks, _, err := ChunkOffice(path, "doc.docx", ".docx", DefaultConfig(), wordCounter{})
+	chunks, _, err := ChunkOffice(context.Background(), path, "doc.docx", ".docx", DefaultConfig(), wordCounter{})
 	if err != nil {
 		t.Fatalf("ChunkOffice: %v", err)
 	}
@@ -146,7 +149,7 @@ func TestChunkOffice_MalformedContainer(t *testing.T) {
 	if err := os.WriteFile(path, []byte("not a zip file at all"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ChunkOffice(path, "broken.docx", ".docx", DefaultConfig(), wordCounter{}); err == nil {
+	if _, _, err := ChunkOffice(context.Background(), path, "broken.docx", ".docx", DefaultConfig(), wordCounter{}); err == nil {
 		t.Error("expected an error for a non-ZIP .docx, got nil")
 	}
 }
@@ -172,11 +175,46 @@ func TestChunkOffice_ZipEntryCap(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = extractOfficeParagraphs(path, ".docx")
+	_, err = extractOfficeParagraphs(context.Background(), path, ".docx")
 	if err == nil {
 		t.Fatal("expected an error for a zip-flood container, got nil")
 	}
 	if !strings.Contains(err.Error(), "entries") {
 		t.Errorf("error = %v, want it to mention the entry-count cap", err)
+	}
+}
+
+// TestChunkOffice_XMLOversizeFails (re-review FIX 2): a document.xml larger than
+// maxOfficeXML must FAIL with the bare ErrExtractionOversize sentinel, NOT be
+// silently truncated at the cap and indexed as a partial document. The synthetic
+// docx carries one giant paragraph whose document.xml exceeds maxOfficeXML; the
+// extractor must reject it rather than return truncated text.
+func TestChunkOffice_XMLOversizeFails(t *testing.T) {
+	// Build a document.xml whose serialized size exceeds maxOfficeXML. One <w:p>
+	// with a single <w:t> run of >maxOfficeXML 'a' bytes does it; Deflate makes
+	// the on-disk zip tiny so the test stays cheap.
+	big := strings.Repeat("a", maxOfficeXML+1024)
+	var body strings.Builder
+	body.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
+	body.WriteString(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>`)
+	body.WriteString(`<w:p><w:r><w:t xml:space="preserve">`)
+	body.WriteString(big)
+	body.WriteString(`</w:t></w:r></w:p></w:body></w:document>`)
+
+	entries := []zipEntry{
+		{"word/document.xml", body.String(), zip.Deflate},
+	}
+	raw, err := buildZip(entries)
+	if err != nil {
+		t.Fatalf("buildZip: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "huge.docx")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = extractOfficeParagraphs(context.Background(), path, ".docx")
+	if !errors.Is(err, ErrExtractionOversize) {
+		t.Fatalf("extractOfficeParagraphs over maxOfficeXML = %v, want ErrExtractionOversize (must not silently truncate)", err)
 	}
 }

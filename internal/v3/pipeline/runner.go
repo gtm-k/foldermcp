@@ -388,7 +388,14 @@ func (r *Runner) runExtractedDocument(ctx context.Context, tx *sql.Tx, f fileRow
 	// it to the chunker pass with the bare 'document_oversize' marker.
 	if f.Size > maxDocumentBytes {
 		r.currentPass = PassChunker
-		return fmt.Errorf("%w (%d bytes > cap %d)", errDocumentOversize, f.Size, maxDocumentBytes)
+		// Return the BARE sentinel so pipeline_state.error_message is exactly
+		// "document_oversize" — the end-of-run histogram buckets on
+		// substr(error_message,1,80), so an interpolated byte count would put
+		// every oversize document of a different size in its own bucket. Surface
+		// the size detail via a WARN instead so the diagnostic is not lost. Mirrors
+		// how the chunker sentinels are returned bare.
+		r.logger().Warn("runner: document oversize", "file_id", f.ID, "size", f.Size, "cap", maxDocumentBytes)
+		return errDocumentOversize
 	}
 
 	// Extract first (before any DB writes) so a failure leaves no partial node.
@@ -404,7 +411,7 @@ func (r *Runner) runExtractedDocument(ctx context.Context, tx *sql.Tx, f fileRow
 		chunks, stats, err = chunker.ChunkPDF(ctx, f.Path, title, r.Cfg, r.Counter, r.PDFCfg)
 	case ".docx", ".odt":
 		kind = "office_text"
-		chunks, stats, err = chunker.ChunkOffice(f.Path, title, ext, r.Cfg, r.Counter)
+		chunks, stats, err = chunker.ChunkOffice(ctx, f.Path, title, ext, r.Cfg, r.Counter)
 	default:
 		// IsBinaryDocumentExt and this switch must agree; a new ext added there
 		// without a route here is a bug, surfaced visibly rather than silently

@@ -5,6 +5,7 @@ package chunker
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -25,11 +26,21 @@ const officeExtractorVersion = "office-zipxml-v1"
 const maxOfficeXML = 16 * 1024 * 1024 // 16 MB of document XML
 
 // maxZipEntries bounds the number of entries in an office container (F4). A
-// malicious ZIP can carry a central directory with millions of entry headers (a
-// "zip flood") that forces archive/zip to allocate one *zip.File per entry —
-// memory DoS — before we ever read a byte of content. Real docx/odt files have
-// tens of entries (parts, rels, media); 4096 is far above any legitimate
-// document yet bounds the attack.
+// malicious ZIP can carry a central directory with many entry headers (a "zip
+// flood") that forces archive/zip to allocate one *zip.File per entry. Real
+// docx/odt files have tens of entries (parts, rels, media); 4096 is far above
+// any legitimate document yet bounds the post-open slice.
+//
+// This guard sits AFTER zip.OpenReader, which already parses the central
+// directory and allocates the zr.File slice — so it is defense-in-depth, NOT an
+// unbounded-allocation guard. The hard upper bound on entry count is the
+// maxDocumentBytes cap (64 MB), enforced by the runner BEFORE ChunkOffice runs:
+// each central-directory entry header is ≥46 bytes, so a 64 MB container holds
+// at most ~1.4M entry headers — bounded, not unbounded. (re-review FIX 3,
+// option (b): a hand-rolled End-Of-Central-Directory preflight was judged too
+// risky to get right — Zip64, archive comments, and the 0xFFFF total-entries
+// sentinel make it easy to falsely reject valid Office files; correctness of
+// valid-file handling outranks tightening this already-bounded case.)
 const maxZipEntries = 4096
 
 // ChunkOffice extracts text from a docx or odt ZIP container and produces
@@ -47,8 +58,13 @@ const maxZipEntries = 4096
 // pdftotext-style page breaks), so headers are "p1¶<para> — <title>" and the
 // page-anchored chunking core is reused with no form-feed. byte_start/byte_end
 // are relative to the joined extracted text (D18).
-func ChunkOffice(path, title, ext string, cfg Config, counter Counter) ([]ExtractedChunk, ExtractStats, error) {
-	paras, err := extractOfficeParagraphs(path, ext)
+//
+// ctx is threaded for cancellation symmetry with ChunkPDF (re-review FIX 4): the
+// memory is already bounded (maxZipEntries + maxOfficeXML), so this is about
+// honoring a daemon shutdown promptly, NOT DoS. A cancellation is returned as
+// ctx.Err() so the runner treats it as shutdown, not a per-file failure.
+func ChunkOffice(ctx context.Context, path, title, ext string, cfg Config, counter Counter) ([]ExtractedChunk, ExtractStats, error) {
+	paras, err := extractOfficeParagraphs(ctx, path, ext)
 	if err != nil {
 		return nil, ExtractStats{}, err
 	}
@@ -62,12 +78,23 @@ func ChunkOffice(path, title, ext string, cfg Config, counter Counter) ([]Extrac
 // extractOfficeParagraphs opens the ZIP container and returns the document's
 // paragraphs as plain-text strings (empty paragraphs dropped). It never panics
 // on a malformed container — it returns an error the runner records visibly.
-func extractOfficeParagraphs(path, ext string) ([]string, error) {
+func extractOfficeParagraphs(ctx context.Context, path, ext string) ([]string, error) {
+	// Honor a daemon shutdown before doing any work (FIX 4). Returned as the
+	// context error so the runner treats it as cancellation, not a bad file.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open office container %s: %w", path, err)
 	}
 	defer func() { _ = zr.Close() }()
+
+	// Re-check after the (potentially slow) central-directory parse so a shutdown
+	// during zip open is honored before we parse the XML (FIX 4).
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// Entry-count cap (F4): reject a zip-flood container before iterating its
 	// (potentially millions of) entry headers.
@@ -102,9 +129,20 @@ func extractOfficeParagraphs(path, ext string) ([]string, error) {
 	}
 	defer func() { _ = rc.Close() }()
 
-	raw, err := io.ReadAll(io.LimitReader(rc, maxOfficeXML))
+	// Read maxOfficeXML+1 bytes so we can DISTINGUISH "exactly at the cap" from
+	// "over the cap". io.LimitReader(rc, maxOfficeXML) would silently return EOF at
+	// the cap, truncating an oversize document.xml and indexing it as a partial
+	// document done — a silent failure (the PDF path correctly fails via
+	// cappedBuffer; office must too, FIX 2). If we read more than maxOfficeXML,
+	// reject with the bare ErrExtractionOversize sentinel (the runner normalizes it
+	// to error_message='extraction_oversize', same as the PDF path) instead of
+	// truncating.
+	raw, err := io.ReadAll(io.LimitReader(rc, maxOfficeXML+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %s in %s: %w", docPart, path, err)
+	}
+	if len(raw) > maxOfficeXML {
+		return nil, fmt.Errorf("office container %s: %s is %d+ bytes: %w", path, docPart, maxOfficeXML, ErrExtractionOversize)
 	}
 
 	if ext == ".docx" {
