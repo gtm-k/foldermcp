@@ -1,0 +1,321 @@
+syntax = "proto3";
+
+package foldermcp.v3;
+
+option go_package = "github.com/gtm-k/foldermcp/internal/v3/proto/gen";
+
+// ─── Narrow retrieval (primitive layer) ─────────────────
+
+service IndexQuery {
+  rpc VectorSearch    (VectorSearchRequest)    returns (VectorSearchResponse);
+  rpc FTSSearch       (FTSSearchRequest)       returns (FTSSearchResponse);
+  rpc FilenameSearch  (FilenameSearchRequest)  returns (FilenameSearchResponse);
+  rpc MetadataSearch  (MetadataSearchRequest)  returns (MetadataSearchResponse);
+  rpc GraphExpand     (GraphExpandRequest)     returns (GraphExpandResponse);
+  rpc GetNodes        (GetNodesRequest)        returns (GetNodesResponse);
+  rpc GetChunks       (GetChunksRequest)       returns (GetChunksResponse);
+  rpc GetBlob         (GetBlobRequest)         returns (GetBlobResponse);
+  rpc Batch           (BatchRequest)           returns (BatchResponse);
+}
+
+// ─── High-level agent-task RPCs (M1 ships 3) ────────────
+
+service IndexTools {
+  rpc SearchBroadly (SearchBroadlyRequest) returns (SearchBroadlyResponse);
+  rpc InspectNode   (InspectNodeRequest)   returns (InspectNodeResponse);
+  rpc BrowseFolder  (BrowseFolderRequest)  returns (BrowseFolderResponse);
+  // GetOverview   — M2, not implemented in M1
+  // GetNeighbors  — M2, not implemented in M1
+}
+
+// ─── Admin (M1 ships Status+Health only) ─────────────────
+
+service IndexAdmin {
+  rpc Status (StatusRequest) returns (StatusResponse);
+  rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+// ─── Capabilities (version negotiation) ──────────────────
+
+service IndexCapabilities {
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}
+
+// ─── Common types ────────────────────────────────────────
+
+message HydrationHint {
+  bool  chunks          = 1;
+  bool  metadata        = 2;
+  bool  provenance      = 3;
+  int32 chunks_per_node = 4;
+}
+
+message NodeRef {
+  int64 node_id = 1;
+}
+
+message HydratedNode {
+  int64  node_id = 1;
+  int64  file_id = 2;
+  string path = 3;
+  string node_type = 4;
+  string name = 5;
+  string content_class = 6;
+  string language = 7;
+  string provenance = 8;
+  float  confidence = 9;
+  repeated HydratedChunk chunks = 10;
+  string properties_json = 11;
+}
+
+message HydratedChunk {
+  int64  chunk_id = 1;
+  string text = 2;
+  int32  token_count = 3;
+  string chunk_kind = 4;
+}
+
+message SourceStatus {
+  string source_name   = 1;
+  string status        = 2;
+  int32  latency_ms    = 3;
+  string error_message = 4;
+}
+
+// ─── VectorSearch ────────────────────────────────────────
+
+message VectorSearchRequest {
+  bytes          query_embedding_int8 = 1;
+  int32          k = 2;
+  repeated string content_classes = 3;
+  HydrationHint  hydrate = 4;
+}
+
+message VectorSearchResponse {
+  repeated ScoredNode results = 1;
+  SourceStatus        status  = 2;
+}
+
+message ScoredNode {
+  int64  node_id = 1;
+  float  score = 2;
+  HydratedNode hydrated = 3;
+}
+
+// ─── FTSSearch ───────────────────────────────────────────
+
+message FTSSearchRequest {
+  string         query = 1;
+  int32          k = 2;
+  repeated string content_classes = 3;
+  HydrationHint  hydrate = 4;
+}
+
+message FTSSearchResponse {
+  repeated ScoredNode results = 1;
+  SourceStatus        status  = 2;
+}
+
+// ─── FilenameSearch ──────────────────────────────────────
+
+message FilenameSearchRequest {
+  string         query = 1;
+  int32          k = 2;
+  HydrationHint  hydrate = 3;
+}
+
+message FilenameSearchResponse {
+  repeated ScoredNode results = 1;
+  SourceStatus        status  = 2;
+}
+
+// ─── MetadataSearch ──────────────────────────────────────
+
+message MetadataSearchRequest {
+  string         content_class = 1;
+  string         path_prefix = 2;
+  int64          mtime_from = 3;
+  int64          mtime_to = 4;
+  int32          k = 5;
+  HydrationHint  hydrate = 6;
+}
+
+message MetadataSearchResponse {
+  repeated ScoredNode results = 1;
+  SourceStatus        status  = 2;
+}
+
+// ─── GraphExpand (stub in M1 — no edges produced yet) ────
+
+message GraphExpandRequest {
+  repeated int64 seed_node_ids = 1;
+  int32  max_depth = 2;
+  int32  max_total_nodes = 3;
+  repeated string edge_types = 4;
+}
+
+message GraphExpandResponse {
+  repeated NodeRef visited = 1;
+  SourceStatus     status  = 2;
+}
+
+// ─── GetNodes / GetChunks / GetBlob ──────────────────────
+
+message GetNodesRequest {
+  repeated int64 node_ids = 1;
+  HydrationHint  hydrate = 2;
+}
+
+message GetNodesResponse {
+  repeated HydratedNode nodes = 1;
+}
+
+message GetChunksRequest {
+  repeated int64 chunk_ids = 1;
+}
+
+message GetChunksResponse {
+  repeated HydratedChunk chunks = 1;
+}
+
+message GetBlobRequest {
+  int64 blob_id = 1;
+}
+
+message GetBlobResponse {
+  bytes data = 1;
+  string mime = 2;
+}
+
+// ─── Batch RPC ───────────────────────────────────────────
+
+message BatchRequest {
+  repeated BatchOp ops = 1;
+}
+
+message BatchOp {
+  oneof op {
+    VectorSearchRequest   vector = 1;
+    FTSSearchRequest      fts = 2;
+    FilenameSearchRequest filename = 3;
+    MetadataSearchRequest metadata = 4;
+    GraphExpandRequest    graph_expand = 5;
+    GetNodesRequest       get_nodes = 6;
+    GetChunksRequest      get_chunks = 7;
+  }
+}
+
+message BatchResponse {
+  repeated BatchResult results = 1;
+  repeated string       warnings = 2;
+}
+
+message BatchResult {
+  oneof result {
+    VectorSearchResponse   vector = 1;
+    FTSSearchResponse      fts = 2;
+    FilenameSearchResponse filename = 3;
+    MetadataSearchResponse metadata = 4;
+    GraphExpandResponse    graph_expand = 5;
+    GetNodesResponse       get_nodes = 6;
+    GetChunksResponse      get_chunks = 7;
+  }
+  string error = 8;
+}
+
+// ─── IndexTools.SearchBroadly ──────────��─────────────────
+
+message SearchBroadlyRequest {
+  string query = 1;
+  string detail = 2;
+  string mode = 3;
+  repeated string content_classes = 4;
+  int64  time_range_from = 5;
+  int64  time_range_to = 6;
+  int32  max_results = 7;
+}
+
+message SearchBroadlyResponse {
+  string overall_status = 1;
+  string completeness = 2;
+  repeated string failed_sources = 3;
+  bool retryable = 4;
+  repeated SourceStatus sources = 5;
+  repeated SearchHit results = 6;
+  repeated string warnings = 7;
+}
+
+message SearchHit {
+  int64  node_id = 1;
+  string path = 2;
+  string title = 3;
+  string snippet = 4;
+  float  score = 5;
+  repeated string matched_sources = 6;
+}
+
+// ─── IndexTools.InspectNode ──────────────────────────────
+
+message InspectNodeRequest {
+  int64 node_id = 1;
+  string detail = 2;
+}
+
+message InspectNodeResponse {
+  HydratedNode node = 1;
+  SourceStatus status = 2;
+}
+
+// ─── IndexTools.BrowseFolder ─────────────────────────────
+
+message BrowseFolderRequest {
+  string path = 1;
+  int32  max_items = 2;
+  string cursor = 3;
+}
+
+message BrowseFolderResponse {
+  repeated FolderEntry entries = 1;
+  string next_cursor = 2;
+  SourceStatus status = 3;
+}
+
+message FolderEntry {
+  string name = 1;
+  string path = 2;
+  bool   is_dir = 3;
+  int64  size = 4;
+  int64  mtime = 5;
+  string content_class = 6;
+  int64  file_id = 7;
+}
+
+// ─── Admin ───────────────────────────────────────────────
+
+message StatusRequest {}
+message StatusResponse {
+  int64 files_total = 1;
+  int64 files_indexed = 2;
+  map<string, int64> pass_counts = 3;
+  int64 uptime_seconds = 4;
+  string instance_uuid = 5;
+}
+
+message HealthRequest {}
+message HealthResponse {
+  bool   db_quick_check_ok = 1;
+  bool   integrity_check_ok = 2;
+  string error_message = 3;
+}
+
+// ─── Capabilities ────────────────────────────────────────
+
+message GetCapabilitiesRequest {}
+message GetCapabilitiesResponse {
+  string server_version = 1;
+  int32  wire_version = 2;
+  int32  schema_version = 3;
+  int32  retrieval_semantics_version = 4;
+  repeated string features = 5;
+  repeated string rpcs_supported = 6;
+}

@@ -29,3 +29,37 @@ clean:
 ## install: Install binary to GOPATH/bin
 install:
 	$(GO) install $(CMD_DIR)
+
+.PHONY: v3-build v3-test v3-lint v3-proto
+
+## v3-build: Compile the v3 indexer daemon (cgo required + mattn sqlite_fts5)
+v3-build:
+	CGO_ENABLED=1 $(GO) build -tags "cgo sqlite_fts5" -o $(BUILD_DIR)/foldermcp-v3 $(CMD_DIR)
+
+## v3-test: Run v3 tests with race detection (cgo + sqlite_fts5 for FTS5 virtual tables)
+v3-test:
+	CGO_ENABLED=1 $(GO) test -race -tags "cgo sqlite_fts5" ./internal/v3/...
+
+## v3-lint: Run golangci-lint over the v3 subtree (cgo + sqlite_fts5 tags)
+v3-lint:
+	golangci-lint run --build-tags "cgo,sqlite_fts5" ./internal/v3/...
+
+## v3-proto: Regenerate v3 protobuf stubs
+v3-proto:
+	protoc --go_out=. --go_opt=paths=source_relative \
+	       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	       internal/v3/proto/foldermcp.proto
+
+.PHONY: v3-package-windows
+
+## v3-package-windows: Build a self-contained Windows release bundle (binary + ONNX DLLs + model) as dist/foldermcp-windows-amd64.zip. Needs mingw-w64, curl, python3.
+v3-package-windows:
+	bash scripts/package-windows.sh
+
+V3_MODEL_DIR=internal/v3/embed/model
+
+## v3-fetch-model: Download all-MiniLM-L6-v2 ONNX model and tokenizer
+v3-fetch-model:
+	mkdir -p $(V3_MODEL_DIR)
+	test -f $(V3_MODEL_DIR)/model.onnx || curl -L -o $(V3_MODEL_DIR)/model.onnx https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+	test -f $(V3_MODEL_DIR)/tokenizer.json || curl -L -o $(V3_MODEL_DIR)/tokenizer.json https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json

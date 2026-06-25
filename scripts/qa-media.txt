@@ -1,0 +1,10 @@
+# QA workspace — homelab media file list
+# Format: URL SHA256
+# These are CC-BY or public domain media files for testing binary detection
+# and metadata extraction stubs.
+#
+# TODO(M1): Populate with free-sample MP4, WAV, MP3, and CC-BY photos with EXIF.
+# Target: ~500 MB total.
+#
+# Example format:
+# https://example.com/sample.mp4 a1b2c3...sha256...
