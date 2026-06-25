@@ -1034,3 +1034,110 @@ func TestRunner_BinaryJSONSkipped(t *testing.T) {
 		t.Error("good.json produced no data_structured chunks")
 	}
 }
+
+// TestRunner_EmptyDataFileSkipped (FIX 1, BLOCKING): an empty/whitespace-only
+// structured-data file must be OBSERVABLY skipped (status=skipped,
+// error_message="empty_content", ZERO chunks) — NOT marked done-with-zero-chunks.
+// A done-with-zero-chunks file is dropped from PendingFiles forever and silently
+// unsearchable (the same silent-failure class A4 guards for extracted documents).
+// A "{}" JSON is a valid empty object and is the control: it must still index.
+func TestRunner_EmptyDataFileSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := seedDir(t, map[string]string{
+		"empty.csv":     "",     // 0-byte CSV
+		"empty.json":    "",     // truly empty (NOT "{}")
+		"blank.yaml":    "  \n", // whitespace-only YAML
+		"emptyobj.json": "{}",   // valid empty object — control, MUST index
+	})
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for _, suffix := range []string{"empty.csv", "empty.json", "blank.yaml"} {
+		id := fileIDByPathSuffix(t, db, suffix)
+		for _, pass := range []string{"structural", "chunker", "embeddings"} {
+			var status, msg string
+			if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, id, pass).Scan(&status, &msg); err != nil {
+				t.Fatalf("%s %s row: %v", suffix, pass, err)
+			}
+			if status != "skipped" || msg != "empty_content" {
+				t.Errorf("%s %s = (%q,%q), want (skipped, empty_content)", suffix, pass, status, msg)
+			}
+		}
+		// ZERO chunks — and crucially NOT embeddings=done-with-zero-chunks.
+		if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, id); got != 0 {
+			t.Errorf("%s produced %d chunks, want 0", suffix, got)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM pipeline_state WHERE file_id=? AND pass_name='embeddings' AND status='done'`, id); got != 0 {
+			t.Errorf("%s embeddings marked done — silent done-with-zero-chunks (FIX 1 regression)", suffix)
+		}
+	}
+
+	// Control: "{}" is a valid empty JSON object — NON-empty text (2 bytes) — and
+	// must INDEX, not be skipped as empty_content. The structure-aware chunker
+	// finds no leaves to outline so it declines (ErrDataFallback, reason
+	// "empty_structure") and the file is prose-chunked: the 2-byte body "{}" yields
+	// a prose chunk and reaches embeddings=done. The load-bearing guarantee FIX 1
+	// must not break is "{} indexes (done, non-zero chunks), never skipped".
+	objID := fileIDByPathSuffix(t, db, "emptyobj.json")
+	var objStatus, objMsg string
+	if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name='embeddings'`, objID).Scan(&objStatus, &objMsg); err != nil {
+		t.Fatalf("emptyobj.json embeddings row: %v", err)
+	}
+	if objStatus != "done" {
+		t.Errorf("emptyobj.json embeddings = (%q,%q), want done ({} is a valid non-empty body, must index — not skipped)", objStatus, objMsg)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, objID); got == 0 {
+		t.Error("emptyobj.json ({}) produced zero chunks — FIX 1 must not skip a valid non-empty object")
+	}
+}
+
+// TestRunner_BinaryDataPast8KBSkipped (FIX 5, R3 defense-in-depth): a .json that
+// is CLEAN through the first ~9 KB then carries a NUL byte PAST the 8 KB classifier
+// sample window. The classifier (layer a) samples only 8 KB, so it sees clean text
+// and keeps content_class 'data'; the file reaches runDataDocument, whose FULL-BODY
+// IsBinaryContent re-check (layer b) must fire and skip it with
+// "binary_content_detected" and ZERO chunks. This pins the runner re-check that
+// TestRunner_BinaryJSONSkipped (NUL in the first bytes) never reaches.
+func TestRunner_BinaryDataPast8KBSkipped(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	// ~9 KB of clean JSON-ish text (no NUL) — beyond the 8192-byte sniff window —
+	// then a NUL byte. The classifier samples only 8 KB and sees clean text.
+	var b bytes.Buffer
+	b.WriteString(`{"data":"`)
+	for b.Len() < 9000 {
+		b.WriteString("clean-text-padding ")
+	}
+	b.WriteString(`",`)
+	b.WriteByte(0x00) // NUL past the 8 KB classifier window
+	b.WriteString(`"x":1}`)
+	writeFile(t, dir, "late-binary.json", b.Bytes())
+	r := newTestRunner(t, db)
+	if err := r.Run(context.Background(), dir); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	id := fileIDByPathSuffix(t, db, "late-binary.json")
+	// content_class must still be 'data' — proving the classifier did NOT catch it
+	// and the runner's full-body re-check (layer b) is what fired.
+	var cc string
+	if err := db.QueryRow(`SELECT content_class FROM files WHERE file_id=?`, id).Scan(&cc); err != nil {
+		t.Fatalf("content_class: %v", err)
+	}
+	if cc != "data" {
+		t.Errorf("content_class = %q, want data (classifier must NOT have caught the late NUL — else layer b is untested)", cc)
+	}
+	for _, pass := range []string{"structural", "chunker", "embeddings"} {
+		var status, msg string
+		if err := db.QueryRow(`SELECT status, COALESCE(error_message,'') FROM pipeline_state WHERE file_id=? AND pass_name=?`, id, pass).Scan(&status, &msg); err != nil {
+			t.Fatalf("%s row: %v", pass, err)
+		}
+		if status != "skipped" || msg != "binary_content_detected" {
+			t.Errorf("%s = (%q,%q), want (skipped, binary_content_detected) — runner full-body re-check (R3 layer b)", pass, status, msg)
+		}
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM chunks c JOIN nodes n ON c.node_id=n.node_id WHERE n.file_id=?`, id); got != 0 {
+		t.Errorf("late-binary .json produced %d chunks, want 0", got)
+	}
+}

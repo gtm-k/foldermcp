@@ -32,6 +32,12 @@ const maxDataInputBytes = 32 * 1024 * 1024
 // a huge outline string and then a huge chunk slice. Bounding the outline first
 // bounds both. 200k lines is far beyond any legitimate config/data document yet
 // keeps the worst case linear and small.
+//
+// This is NOT the YAML alias-bomb (billion-laughs) guard: that is handled by
+// yaml.v3 v3.0.1's own internal alias-expansion budget, which rejects an
+// alias-amplified document before Unmarshal returns. maxOutlineLines instead
+// bounds the legitimate-but-huge non-aliased case (a flat document with a vast
+// number of distinct leaves), which the alias budget does not constrain.
 const maxOutlineLines = 200000
 
 // ChunkData reads a JSON/YAML/XML file, normalizes it into a stable key-path /
@@ -156,8 +162,14 @@ func jsonOutline(raw []byte) ([]outlineLine, error) {
 		return nil, err
 	}
 	// Reject trailing garbage after the first value (a malformed doc that happens
-	// to start with a valid value) by requiring EOF.
+	// to start with a valid value) by requiring EOF. dec.More() catches "{...} x"
+	// but returns false for a bare trailing "}" or "]", so a second Decode that
+	// must return io.EOF closes that residual gap.
 	if dec.More() {
+		return nil, fmt.Errorf("trailing data after json value")
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); err != io.EOF {
 		return nil, fmt.Errorf("trailing data after json value")
 	}
 	var lines []outlineLine

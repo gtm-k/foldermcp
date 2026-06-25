@@ -155,6 +155,55 @@ func TestChunkCSVTSV(t *testing.T) {
 	}
 }
 
+// TestChunkCSVAllNumericFirstRowHeaderless (FIX 2): a CSV whose first row is
+// all-numeric is HEADERLESS — looksLikeHeader must reject it so the file is not
+// given columns literally named "1"/"2"/"3". The chunker synthesizes col_0/col_1/…
+// names instead, still emits csv_schema/csv_rows (headerless numeric CSVs are
+// useful to index), and treats the first row as data.
+func TestChunkCSVAllNumericFirstRowHeaderless(t *testing.T) {
+	// All-numeric first row → headerless. No row is a string header.
+	csvData := "1,2,3\n4,5,6\n7,8,9\n10,11,12\n"
+	path := writeTemp(t, "numeric.csv", csvData)
+	chunks, stats, err := ChunkCSV(path, "numeric.csv", DefaultConfig(), wordCounter{})
+	if err != nil {
+		t.Fatalf("ChunkCSV headerless-numeric: %v", err)
+	}
+	var schemaText, schemaHeader string
+	var schema, rows int
+	for _, c := range chunks {
+		switch c.Kind {
+		case "csv_schema":
+			schema++
+			schemaText = c.Text
+			schemaHeader = c.Header
+		case "csv_rows":
+			rows++
+		}
+	}
+	if schema != 1 {
+		t.Errorf("csv_schema = %d, want 1 (headerless still emits a schema)", schema)
+	}
+	if rows == 0 {
+		t.Error("no csv_rows from headerless numeric CSV")
+	}
+	// The column names must be synthetic, NEVER the literal numbers "1"/"2"/"3".
+	for _, bad := range []string{"- 1:", "- 2:", "- 3:"} {
+		if strings.Contains(schemaText, bad) {
+			t.Errorf("headerless CSV produced a column literally named from data (%q) in schema: %q", bad, schemaText)
+		}
+	}
+	for _, want := range []string{"col_0", "col_1", "col_2"} {
+		if !strings.Contains(schemaText, want) && !strings.Contains(schemaHeader, want) {
+			t.Errorf("synthetic column %q missing from schema header/text: %q / %q", want, schemaHeader, schemaText)
+		}
+	}
+	// The first numeric row is treated as DATA: 4 rows total (none consumed as a
+	// header), so the inferred row count is 4, not 3.
+	if stats.Rows != 4 {
+		t.Errorf("stats.Rows = %d, want 4 (first row counted as data, not header)", stats.Rows)
+	}
+}
+
 // TestChunkCSVDtypeInference: dtypes are inferred per column.
 func TestChunkCSVDtypeInference(t *testing.T) {
 	csv := "n,f,d,s\n1,1.5,2024-01-01,hello\n2,2.5,2024-01-02,world\n3,3.5,2024-01-03,foo\n"

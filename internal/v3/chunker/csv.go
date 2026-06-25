@@ -125,17 +125,29 @@ func ChunkCSV(path, title string, cfg Config, counter Counter) ([]DataChunk, Dat
 
 	stats := DataStats{ExtractorVersion: csvExtractorVersion}
 
-	header, err := cr.Read()
+	first, err := cr.Read()
 	if err != nil {
 		// Empty or unreadable as CSV → fall back to prose.
 		stats.ScannedBytes = br.read
 		stats.Truncated = br.truncated
 		return nil, stats, fmt.Errorf("csv read header %s: %w", path, ErrDataFallback)
 	}
-	if len(header) < 1 || !looksLikeHeader(header) {
+	if len(first) < 1 {
 		stats.ScannedBytes = br.read
 		stats.Truncated = br.truncated
 		return nil, stats, fmt.Errorf("csv no usable header %s: %w", path, ErrDataFallback)
+	}
+	// Header detection: an all-numeric first row is data, not a header — the file
+	// is headerless. Rather than name columns "1"/"2"/"3" (which the comment on
+	// looksLikeHeader promised never happens) we synthesize col_0/col_1/… and
+	// treat the first row itself as a data row so it is sampled like any other.
+	var header []string
+	var seedRow []string // a first data row to feed the scan loop (headerless case)
+	if looksLikeHeader(first) {
+		header = first
+	} else {
+		header = syntheticHeader(len(first))
+		seedRow = first
 	}
 	ncol := len(header)
 	stats.Columns = ncol
@@ -152,17 +164,7 @@ func ChunkCSV(path, title string, cfg Config, counter Counter) ([]DataChunk, Dat
 	var headRows, tailRows [][]string
 	tailCap := 30
 
-	for {
-		rec, rerr := cr.Read()
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			// A hard CSV parse error (bad quoting we cannot recover) → fallback.
-			stats.ScannedBytes = br.read
-			stats.Truncated = br.truncated
-			return nil, stats, fmt.Errorf("csv parse %s: %w", path, ErrDataFallback)
-		}
+	observeRow := func(rec []string) {
 		totalRows++
 		if len(rec) != ncol {
 			raggedRows++
@@ -178,6 +180,26 @@ func ChunkCSV(path, title string, cfg Config, counter Counter) ([]DataChunk, Dat
 				tailRows = tailRows[1:]
 			}
 		}
+	}
+
+	// Headerless (all-numeric first row): the synthesized header consumed no real
+	// row, so the first row IS data — observe it before the scan loop.
+	if seedRow != nil {
+		observeRow(seedRow)
+	}
+
+	for {
+		rec, rerr := cr.Read()
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			// A hard CSV parse error (bad quoting we cannot recover) → fallback.
+			stats.ScannedBytes = br.read
+			stats.Truncated = br.truncated
+			return nil, stats, fmt.Errorf("csv parse %s: %w", path, ErrDataFallback)
+		}
+		observeRow(rec)
 	}
 	stats.Rows = totalRows
 	stats.ScannedBytes = br.read
@@ -237,10 +259,10 @@ func ChunkCSV(path, title string, cfg Config, counter Counter) ([]DataChunk, Dat
 	return out, stats, nil
 }
 
-// sniffDelimiter picks the field delimiter from the extension first (.tsv → tab)
-// then defaults to comma. Semicolon is accepted for European CSVs only when the
-// extension is .csv and the first line contains semicolons but no commas — kept
-// deliberately conservative to avoid misreading comma data with stray semicolons.
+// sniffDelimiter picks the field delimiter from the extension: .tsv → tab,
+// everything else → comma. (No first-line semicolon sniff is implemented;
+// European semicolon-delimited .csv files are read as single-column comma data
+// and, being effectively ragged/uninformative, generally fall back to prose.)
 func sniffDelimiter(path string) rune {
 	lower := strings.ToLower(path)
 	switch {
@@ -318,17 +340,55 @@ func isDate(s string) bool {
 	return false
 }
 
-// looksLikeHeader rejects a "header" whose cells are all numeric (almost
-// certainly a data row, meaning the file has no header) — in that case we still
-// proceed but the header detection informs the schema summary. We keep at least
-// one non-empty cell as the bar for a usable header.
+// looksLikeHeader reports whether the candidate first row is a real header rather
+// than a data row. It requires at least one non-empty cell AND rejects a row whose
+// cells are ALL numeric (int/float) — an all-numeric first row is almost certainly
+// data, meaning the file is headerless. In that case the caller synthesizes
+// col_0/col_1/… names (see syntheticHeader) and treats the first row as data, so a
+// headerless numeric CSV never produces columns literally named "1"/"2"/"3".
 func looksLikeHeader(row []string) bool {
+	anyNonEmpty := false
+	allNumeric := true
 	for _, c := range row {
-		if strings.TrimSpace(c) != "" {
-			return true
+		t := strings.TrimSpace(c)
+		if t == "" {
+			continue
+		}
+		anyNonEmpty = true
+		if !isNumeric(t) {
+			allNumeric = false
 		}
 	}
+	if !anyNonEmpty {
+		return false
+	}
+	// Every non-empty cell parsed as a number → data row, not a header.
+	return !allNumeric
+}
+
+// isNumeric reports whether s parses as an int or float (the numeric-header test
+// in looksLikeHeader). A column header like "id" or "2024_total" is not numeric;
+// a bare "1" or "9.99" is.
+func isNumeric(s string) bool {
+	if _, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return true
+	}
+	if _, err := strconv.ParseFloat(s, 64); err == nil {
+		return true
+	}
 	return false
+}
+
+// syntheticHeader builds col_0..col_{n-1} names for a headerless CSV (all-numeric
+// first row). The headerless table is still indexed (csv_schema/csv_rows) with
+// these synthetic names rather than falling back to prose — headerless numeric
+// CSVs are common and useful to retrieve.
+func syntheticHeader(n int) []string {
+	h := make([]string, n)
+	for i := range h {
+		h[i] = fmt.Sprintf("col_%d", i)
+	}
+	return h
 }
 
 func buildSchemaHeader(title string, header []string) string {

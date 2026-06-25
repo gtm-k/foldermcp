@@ -49,6 +49,15 @@ const (
 	// than a flat text file, so a slightly higher cap than maxReadBytes is
 	// defensible) while still bounding the input an extractor sees.
 	maxDocumentBytes = 64 * 1024 * 1024
+	// maxDataFallbackChunks bounds the prose chunks the structured-data prose
+	// fallback (runDataProseFallback) may mint (FIX 4). The structured-data
+	// chunker hard-caps its output at chunker.maxChunksPerDoc (10000) and routes
+	// the overflow to this prose fallback, which otherwise applied NO cap — a
+	// pathological doc could mint unbounded chunks/embeddings in one transaction.
+	// Matching the structured cap keeps the degraded path's resource ceiling in
+	// parity with the clean path; the overflow is truncated with an observable
+	// "fallback_chunks_capped" marker in the node properties rather than failing.
+	maxDataFallbackChunks = 10000
 )
 
 // Runner orchestrates the four-pass pipeline (walker → structural →
@@ -571,12 +580,20 @@ func (r *Runner) runDataDocument(ctx context.Context, tx *sql.Tx, f fileRow) err
 	// walker's 8 KB sample must be skipped, not chunked from garbage. Same
 	// predicate + same marker as the text path (single source of truth).
 	if walker.IsBinaryContent(content) {
-		for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
-			if err = markStatusTx(ctx, tx, f.ID, p, StatusSkipped, "binary_content_detected"); err != nil {
-				return err
-			}
-		}
-		return nil
+		return r.markDataSkipped(ctx, tx, f, "binary_content_detected")
+	}
+
+	// Empty / whitespace-only data file (FIX 1): an empty .csv/.json/.yaml/.xml
+	// would otherwise flow chunker→ErrDataFallback→prose-fallback→ChunkProse("")→
+	// zero chunks and be marked done-with-zero-chunks (silently unsearchable,
+	// dropped from PendingFiles forever — the same silent-failure class A4 guards
+	// for extracted documents). Short-circuit to an observable skip BEFORE any
+	// chunker. An empty config file is legitimately empty, so this is StatusSkipped
+	// (not a failure), mirroring binary_content_detected. NOTE: a "{}" JSON or "[]"
+	// is NON-empty text and is NOT caught here — it parses to a valid empty
+	// structure and still produces a data_structured chunk.
+	if len(strings.TrimSpace(string(content))) == 0 {
+		return r.markDataSkipped(ctx, tx, f, "empty_content")
 	}
 
 	title := filepath.Base(f.Path)
@@ -601,7 +618,14 @@ func (r *Runner) runDataDocument(ctx context.Context, tx *sql.Tx, f fileRow) err
 	}
 
 	if cerr != nil && errors.Is(cerr, chunker.ErrDataFallback) {
-		return r.runDataProseFallback(ctx, tx, f, content)
+		// The chunker classifies WHY it declined via its stats: an oversize/truncated
+		// document vs a malformed/ragged one. Surface that on the degraded path so
+		// "the index only reflects a prefix" is not lost (FIX 3).
+		reason := "malformed"
+		if stats.Truncated {
+			reason = "oversize"
+		}
+		return r.runDataProseFallback(ctx, tx, f, content, &stats, reason)
 	}
 	if cerr != nil {
 		// A context cancellation is shutdown, not a per-file failure.
@@ -614,7 +638,7 @@ func (r *Runner) runDataDocument(ctx context.Context, tx *sql.Tx, f fileRow) err
 	// Defense in depth: a zero-chunk structured-data result falls back to prose
 	// rather than marking the file done-with-zero-chunks (silently unsearchable).
 	if len(dataChunks) == 0 {
-		return r.runDataProseFallback(ctx, tx, f, content)
+		return r.runDataProseFallback(ctx, tx, f, content, &stats, "empty_structure")
 	}
 
 	now := time.Now().Unix()
@@ -671,12 +695,51 @@ RETURNING chunk_id`, fileNodeID, c.Text, c.ByteStart, c.ByteEnd, c.TokenCount, c
 	return r.embedPending(ctx, tx, f)
 }
 
+// markDataSkipped marks all three passes StatusSkipped with an observable marker
+// (e.g. "binary_content_detected", "empty_content") and inserts no chunks —
+// mirroring the text path's skip handling. A skipped data file is honestly
+// surfaced rather than counted as done-with-zero-chunks (silently unsearchable).
+func (r *Runner) markDataSkipped(ctx context.Context, tx *sql.Tx, f fileRow, marker string) error {
+	for _, p := range []PassName{PassStructural, PassChunker, PassEmbeddings} {
+		if err := markStatusTx(ctx, tx, f.ID, p, StatusSkipped, marker); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // runDataProseFallback chunks the raw file content as prose and records the file
 // NODE row with provenance='AMBIGUOUS' (D18): the structure-aware chunker
-// declined (malformed/ragged), so the file is still indexed as prose but flagged
-// so retrieval quality is observable. Runs the full structural→chunker→embeddings
-// lifecycle within the caller's transaction.
-func (r *Runner) runDataProseFallback(ctx context.Context, tx *sql.Tx, f fileRow, content []byte) error {
+// declined (malformed/ragged/oversize), so the file is still indexed as prose but
+// flagged so retrieval quality is observable. Runs the full
+// structural→chunker→embeddings lifecycle within the caller's transaction.
+//
+// FIX 1: the prose chunks are materialized FIRST; a zero-chunk result (empty /
+// whitespace-only content) is marked StatusSkipped("empty_content") with no node
+// or chunks rather than done-with-zero-chunks. FIX 3: the chunker DataStats (when
+// available) and a fallback_reason are threaded into the node properties so the
+// degraded path still records "this file was truncated; the index reflects only a
+// prefix". FIX 4: the prose chunk count is capped at maxDataFallbackChunks for
+// resource parity with the structured path (which returns ErrDataFallback past
+// maxChunksPerDoc) — a pathological doc cannot mint unbounded chunks/embeddings.
+func (r *Runner) runDataProseFallback(ctx context.Context, tx *sql.Tx, f fileRow, content []byte, stats *chunker.DataStats, reason string) error {
+	// Materialize the prose chunks BEFORE writing any state (FIX 1): if the
+	// fallback yields nothing, this is an empty data file — skip observably, never
+	// mark done-with-zero-chunks.
+	proseChunks := chunker.ChunkProse(string(content), r.Cfg, r.Counter)
+	if len(proseChunks) == 0 {
+		return r.markDataSkipped(ctx, tx, f, "empty_content")
+	}
+	// Bound the fallback output (FIX 4): cap the chunk count for parity with the
+	// structured path's maxChunksPerDoc. Truncate-with-observable-note rather than
+	// hard-fail — the file still indexes (its prefix), and "truncated" is surfaced
+	// in the node properties below.
+	fallbackTruncated := false
+	if len(proseChunks) > maxDataFallbackChunks {
+		proseChunks = proseChunks[:maxDataFallbackChunks]
+		fallbackTruncated = true
+	}
+
 	now := time.Now().Unix()
 
 	// Pass 1: structural — a single AMBIGUOUS 'file' node (D18: provenance lives
@@ -685,10 +748,20 @@ func (r *Runner) runDataProseFallback(ctx context.Context, tx *sql.Tx, f fileRow
 	if err := markStatusTx(ctx, tx, f.ID, PassStructural, StatusRunning, ""); err != nil {
 		return err
 	}
-	props, err := json.Marshal(map[string]any{
-		"mime":          f.Mime,
-		"data_fallback": "prose",
-	})
+	propsMap := map[string]any{
+		"mime":            f.Mime,
+		"data_fallback":   "prose",
+		"fallback_reason": reason,
+	}
+	if stats != nil {
+		propsMap["data_stats"] = stats
+	}
+	if fallbackTruncated {
+		// The fallback itself capped the chunk count — record it so the degraded
+		// path's truncation is observable, mirroring DataStats.Truncated.
+		propsMap["fallback_chunks_capped"] = maxDataFallbackChunks
+	}
+	props, err := json.Marshal(propsMap)
 	if err != nil {
 		return fmt.Errorf("marshal data fallback props: %w", err)
 	}
@@ -709,7 +782,7 @@ RETURNING node_id`, f.ID, filepath.Base(f.Path), string(props), now, now).Scan(&
 		return err
 	}
 	r.embedBuf = r.embedBuf[:0]
-	for _, c := range chunker.ChunkProse(string(content), r.Cfg, r.Counter) {
+	for _, c := range proseChunks {
 		var header any
 		if c.Header != "" {
 			header = c.Header
