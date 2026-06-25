@@ -134,7 +134,21 @@ func runV3Search(ctx context.Context, out io.Writer, query string) (*pb.SearchBr
 
 	// Client-side post-filters (no proto change): drop hits outside --path-prefix
 	// and/or --kind, then renumber ranks 1..N in the formatters.
+	var prefiltered int
+	if resp != nil {
+		prefiltered = len(resp.Results)
+	}
 	resp = filterSearchResults(resp, searchKind, searchPathPrefix)
+	// Observable signal: if a filter is active and it removed ALL real hits, the
+	// user would otherwise see a generic "no matches" and could not tell their
+	// filter ate the hits — especially confusing since --kind is a documented
+	// file-extension heuristic. Emit a NOTE to stderr (NOT stdout/JSON, which stay
+	// clean). The exit code stays 1 (zero results is still zero results).
+	if (searchKind != "" || searchPathPrefix != "") && prefiltered > 0 && (resp == nil || len(resp.Results) == 0) {
+		fmt.Fprintf(os.Stderr, "foldermcp search: NOTE all %d hit(s) were removed by "+
+			"--kind/--path-prefix (--kind is a file-extension heuristic); "+
+			"relax the filter to see them\n", prefiltered)
+	}
 
 	var rendered string
 	if jsonOutput {
@@ -152,9 +166,21 @@ func runV3Search(ctx context.Context, out io.Writer, query string) (*pb.SearchBr
 
 // searchExitCode maps a (response, error) pair to a CI-usable process exit code:
 // 2 on any error, 1 when there were zero hits, 0 when at least one hit. Pure.
+//
+// The SearchBroadly handler signals several failures IN-BAND: it sets
+// OverallStatus="error" and returns a nil Go error (e.g. --mode semantic with no
+// embedder / incompatible index, or a required lexical/filename/vector source
+// that did not execute — see internal/v3/grpc/tools/search_broadly.go). An
+// in-band error MUST dominate the zero-hits check, otherwise a broken search
+// backend is indistinguishable from a legitimate empty result set (a false CI
+// contract). "degraded" is partial success WITH hits and is intentionally NOT
+// treated as an error — a degraded response with hits stays exit 0.
 func searchExitCode(resp *pb.SearchBroadlyResponse, err error) int {
 	if err != nil {
 		return 2
+	}
+	if resp != nil && resp.OverallStatus == "error" {
+		return 2 // in-band failure: backend down / required source failed
 	}
 	if resp == nil || len(resp.Results) == 0 {
 		return 1
@@ -307,8 +333,19 @@ func formatSearchResultsJSON(resp *pb.SearchBroadlyResponse, query string) strin
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		// Fields are plain strings/ints; marshal cannot realistically fail. Keep
-		// the contract (valid JSON) even in the impossible case.
-		return fmt.Sprintf("{\"query\":%q,\"status\":\"error\",\"results\":[]}\n", query)
+		// the contract (valid JSON) even in the impossible case. Do NOT use %q here:
+		// Go's %q is not JSON-string-safe (a control byte renders as \x1b, invalid
+		// JSON), so marshal a minimal struct to guarantee valid escaping.
+		fb, ferr := json.Marshal(struct {
+			Query  string `json:"query"`
+			Status string `json:"status"`
+			Error  string `json:"error"`
+		}{Query: query, Status: "error", Error: err.Error()})
+		if ferr != nil {
+			// Doubly-impossible: fall back to a constant valid-JSON literal.
+			return "{\"status\":\"error\",\"results\":[]}\n"
+		}
+		return string(fb) + "\n"
 	}
 	return string(b) + "\n"
 }

@@ -181,6 +181,13 @@ func TestSearchExitCode(t *testing.T) {
 		{"hits", &pb.SearchBroadlyResponse{Results: []*pb.SearchHit{{Path: "/a"}}}, nil, 0},
 		{"zero hits", &pb.SearchBroadlyResponse{Results: nil}, nil, 1},
 		{"nil resp no err", nil, nil, 1},
+		// In-band failure: the handler signals backend/required-source failure via
+		// OverallStatus="error" with a nil Go error. It must dominate the zero-hits
+		// check so a broken backend is NOT mistaken for a legitimate empty result.
+		{"in-band error zero results", &pb.SearchBroadlyResponse{OverallStatus: "error"}, nil, 2},
+		{"in-band error with a result", &pb.SearchBroadlyResponse{OverallStatus: "error", Results: []*pb.SearchHit{{Path: "/a"}}}, nil, 2},
+		// "degraded" is partial success WITH hits — intentionally NOT an error.
+		{"degraded with hits stays 0", &pb.SearchBroadlyResponse{OverallStatus: "degraded", Results: []*pb.SearchHit{{Path: "/a"}}}, nil, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -165,8 +165,15 @@ runtime sitting beside the binary, so those are optional there.
 > `.md .txt .rst …`, `pdf` → `.pdf`, `csv` → `.csv`). It is a convenience filter, not an exact
 > chunk-kind selector.
 
-**Exit codes** (for scripting / CI): `0` = at least one match, `1` = zero matches, `2` = error
-(bad flag, no index, search failure).
+**Exit codes** (for scripting / CI): `0` = at least one match, `1` = zero matches, `2` = error.
+
+> **`search-v3` deliberately uses a 0/1/2 contract** — unlike the other `foldermcp` subcommands,
+> which use `0` = success / `1` = error. The three-way split lets CI distinguish "found" from
+> "not found" from "broke": exit `1` means the search ran fine and there were genuinely zero hits,
+> so a `not found` check can't be confused with a failure. Exit `2` is reserved for runtime errors —
+> invalid `--mode` / `--kind` *values*, no index on disk, or a search/backend failure (including
+> in-band failures the backend reports with a non-nil result but `status="error"`). Note that
+> cobra *usage* errors — an unknown flag or a missing query argument — exit `1`, not `2`.
 
 **`--json` output schema** — a stable object:
 
