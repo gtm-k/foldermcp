@@ -54,6 +54,11 @@ type Server struct {
 type ServerOpts struct {
 	DB       *sql.DB
 	Embedder *embed.Embedder // may be nil — semantic search disabled
+	// Watch surfaces the watch loop's process-level SLO counters
+	// (events_reconciled_total + watch_overflow_recovery_age_seconds) in the
+	// Status RPC. nil when the daemon is not running in --watch mode (FIX D —
+	// without this the D14 SLO observability is dark in production).
+	Watch admin.WatchMetricsProvider
 }
 
 // NewServer creates a fully wired Server with all handlers connected.
@@ -98,7 +103,7 @@ func NewServer(opts ServerOpts) *Server {
 		},
 		inspect:      &tools.InspectHandler{DB: opts.DB, Nodes: nd},
 		browse:       &tools.BrowseHandler{DB: opts.DB},
-		adminH:       &admin.Handler{DB: opts.DB, StartTime: time.Now()},
+		adminH:       &admin.Handler{DB: opts.DB, StartTime: time.Now(), Watch: opts.Watch},
 		capabilities: &CapabilitiesHandler{DB: opts.DB},
 	}
 }
