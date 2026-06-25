@@ -100,7 +100,33 @@ type Runner struct {
 // heuristic would cause. The sandbox pattern list carries no JWT rule and is
 // frozen v0.1.0 code (only the RedactSecrets wrapper is authorized), so this
 // JWT-specific rule lives at the ingest layer alongside RedactSecrets.
-var jwtPattern = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}`)
+//
+// MED-4: the `eyJ`-anchored header segment still requires {6,} (a real JWT
+// header is always >= a dozen base64url chars), which preserves the SHA-safety
+// guarantee — the anchor PLUS two mandatory dots already make it impossible to
+// match a 40-char flat git SHA, a content hash, or a single base64 literal
+// (none carry the dot-delimited triple). But the SECOND (claims) and THIRD
+// (signature) segments are relaxed to {0,}: a compact JWT can have empty claims
+// (`e30` is base64 of `{}`, only 3 chars) and an unsecured JWS (alg=none) ends
+// in an EMPTY signature segment (`...header.claims.`). The old {6,} on those
+// two segments silently let such valid-but-short JWTs through unredacted.
+var jwtPattern = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]*`)
+
+// pemPrivateKeyPattern matches an ENTIRE PEM private-key block — from the
+// `-----BEGIN ... PRIVATE KEY-----` header THROUGH the matching
+// `-----END ... PRIVATE KEY-----` footer, including the base64 key body in
+// between (HIGH-2). The sandbox pattern list only masks the single BEGIN line,
+// leaving the base64 body and END line in chunks.text/header/FTS/embeddings —
+// but the BODY *is* the secret, so masking only the header line is a leak. This
+// multi-line rule lives at the ingest layer (the sandbox pattern list is frozen
+// v0.1.0 code) alongside jwtPattern.
+//
+// RE2 (Go regexp) is linear-time with NO backtracking, so there is no ReDoS
+// risk even on a pathological input. `(?s)` (dotall) lets `[\s\S]*?` span the
+// body across newlines; the lazy `*?` stops at the FIRST matching END footer so
+// two adjacent key blocks are redacted as two blocks, not greedily merged into
+// one (which would leave any non-key text between them unredacted-by-accident).
+var pemPrivateKeyPattern = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----`)
 
 // redactIngest applies pattern-only secret redaction to chunk text BEFORE it is
 // INSERTed, so a matched secret is replaced with [REDACTED] and never reaches
@@ -113,12 +139,37 @@ var jwtPattern = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A
 // heuristic runs only at EGRESS — grpc/tools/redact.go). Increments
 // chunksRedactedTotal when a redaction actually fired.
 func (r *Runner) redactIngest(text string) string {
-	red := sandbox.RedactSecrets(text)
+	// HIGH-2: collapse the FULL PEM private-key block (BEGIN line + base64 body +
+	// END line) to a single marker. This MUST run BEFORE sandbox.RedactSecrets:
+	// the sandbox pattern list masks only the single "-----BEGIN ... PRIVATE
+	// KEY-----" line, and if it fires first the BEGIN anchor is gone and the
+	// block pattern can no longer span to the END footer — leaving the base64
+	// body (which IS the secret) and the END line behind in chunks.text/FTS/embeddings.
+	red := pemPrivateKeyPattern.ReplaceAllString(text, "[REDACTED]")
+	red = sandbox.RedactSecrets(red)
 	red = jwtPattern.ReplaceAllString(red, "[REDACTED]")
 	if red != text {
 		r.chunksRedactedTotal++
 	}
 	return red
+}
+
+// redactIngestHeader applies the SAME pattern-only ingest redaction as
+// redactIngest to a chunk's `header` value before it is bound to the INSERT
+// (HIGH-1). chunks_fts indexes BOTH text AND header (0001_init.sql / 0004), so a
+// secret embedded in a file-derived header — a CSV column name (csv_schema
+// headers are built from column names), a structured-data key-path outline, or a
+// prose heading — is FINDABLE via an FTS MATCH on the header column even when the
+// chunk text is redacted. Redacting the header through the same pattern-only path
+// closes that leak. NOT the long-token heuristic, for the same D17 reason text
+// uses pattern-only at ingest. Takes/returns `any` so the call sites that bind a
+// nil header (NULL column) pass it through untouched.
+func (r *Runner) redactIngestHeader(header any) any {
+	s, ok := header.(string)
+	if !ok || s == "" {
+		return header
+	}
+	return r.redactIngest(s)
 }
 
 type pendingChunk struct {
@@ -208,6 +259,10 @@ func (r *Runner) Run(ctx context.Context, root string) error {
 	// every pending file has been attempted.
 	attempted := make(map[int64]bool)
 	r.failedFiles = 0
+	// MED-5: reset the per-run redaction counter alongside failedFiles. Without
+	// this a reused Runner would report a LIFETIME redaction count beside per-run
+	// file counts in logSummary, misleading the operator.
+	r.chunksRedactedTotal = 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -552,6 +607,9 @@ RETURNING node_id`, f.ID, title, string(props), now, now).Scan(&fileNodeID); err
 		if c.Header != "" {
 			header = c.Header
 		}
+		// HIGH-1: redact the header too — chunks_fts indexes header, so a secret
+		// in a file-derived heading would be FTS-findable even when text is clean.
+		header = r.redactIngestHeader(header)
 		// Layer 2 ingest redaction (D17): redact secrets before INSERT so FTS
 		// and embeddings see only redacted text. The SAME redacted text is
 		// embedded (pendingChunk.text) — a leak in either store is a leak.
@@ -721,6 +779,10 @@ RETURNING node_id`, f.ID, title, string(props), now, now).Scan(&fileNodeID); err
 		if c.Header != "" {
 			header = c.Header
 		}
+		// HIGH-1: redact the header too. csv_schema headers are built from CSV
+		// COLUMN NAMES and data outlines from key-paths — a secret planted in a
+		// column name / key would otherwise be FTS-findable via the header column.
+		header = r.redactIngestHeader(header)
 		// Layer 2 ingest redaction (D17): redact before INSERT; same text embedded.
 		text := r.redactIngest(c.Text)
 		var chunkID int64
@@ -832,6 +894,8 @@ RETURNING node_id`, f.ID, filepath.Base(f.Path), string(props), now, now).Scan(&
 		if c.Header != "" {
 			header = c.Header
 		}
+		// HIGH-1: redact the header too (chunks_fts indexes header).
+		header = r.redactIngestHeader(header)
 		// Layer 2 ingest redaction (D17): redact before INSERT; same text embedded.
 		text := r.redactIngest(c.Text)
 		var chunkID int64
@@ -965,6 +1029,10 @@ func (r *Runner) runChunker(ctx context.Context, tx *sql.Tx, f fileRow, content 
 		// code/prose chunks of a text file inherit it. The SAME redacted text is
 		// embedded (out's pendingChunk.text).
 		text = r.redactIngest(text)
+		// HIGH-1: redact the header too — chunks_fts indexes header, so a secret
+		// in a prose heading would be FTS-findable even when text is redacted.
+		// nil headers (the code-AST branch) pass through untouched.
+		header = r.redactIngestHeader(header)
 		var chunkID int64
 		if err := tx.QueryRowContext(ctx, `
 INSERT INTO chunks(node_id, text, byte_start, byte_end, token_count, chunk_kind, header)

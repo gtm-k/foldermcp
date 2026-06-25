@@ -39,7 +39,11 @@ var secretDenyGlobs = []string{
 func matchesSecretDeny(name string) bool {
 	lower := strings.ToLower(name)
 	for _, g := range secretDenyGlobs {
-		if ok, _ := filepath.Match(g, lower); ok {
+		// LOW-7: fail CLOSED on a malformed pattern. filepath.Match only errors on
+		// a bad PATTERN (ErrBadPattern), never on the name, so an error means our
+		// own deny glob is broken — treat that as a match and exclude the file
+		// rather than indexing a credential-bearing file because the guard threw.
+		if ok, err := filepath.Match(g, lower); err != nil || ok {
 			return true
 		}
 	}
