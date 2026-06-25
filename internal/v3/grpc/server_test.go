@@ -110,8 +110,9 @@ func TestServerBootsAndAnswersCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.SchemaVersion != 3 {
-		t.Errorf("schema_version = %d, want 3", resp.SchemaVersion)
+	// A4 added migration 0004 (chunk_kind widening); a migrated store reports 4.
+	if resp.SchemaVersion != 4 {
+		t.Errorf("schema_version = %d, want 4", resp.SchemaVersion)
 	}
 	if resp.WireVersion != 1 {
 		t.Errorf("wire_version = %d", resp.WireVersion)
