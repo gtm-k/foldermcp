@@ -16,6 +16,14 @@ import (
 // VectorHandler implements VectorSearch using sqlite-vec brute-force KNN.
 type VectorHandler struct {
 	DB *sql.DB
+	// Disabled is set when the stored index was quantized with a scheme
+	// incompatible with this server's query encoder (fingerprint mismatch).
+	// Vector search then returns a DEGRADED status instead of running KNN on
+	// incomparable int8 codes — which would silently return garbage rankings.
+	// Set centrally by NewServer so EVERY entry point is gated (the public
+	// VectorSearch RPC and Batch accept client-supplied int8 codes and never
+	// touch the embedder, so an embedder-nil gate alone does not cover them).
+	Disabled bool
 }
 
 // Search uses sqlite-vec's KNN: the vec0 virtual table is queried with
@@ -24,6 +32,17 @@ type VectorHandler struct {
 func (h *VectorHandler) Search(ctx context.Context, req *pb.VectorSearchRequest) (*pb.VectorSearchResponse, error) {
 	start := time.Now()
 	resp := &pb.VectorSearchResponse{Status: &pb.SourceStatus{SourceName: "vector"}}
+
+	if h.Disabled {
+		// The stored codes were quantized with a different scheme than this
+		// server's encoder; KNN on them would silently return garbage. Refuse
+		// here so the raw VectorSearch RPC and Batch are gated too, not just
+		// the embedder-driven SearchBroadly path.
+		resp.Status.Status = "DEGRADED"
+		resp.Status.ErrorMessage = "semantic search disabled: index quantization is incompatible with this server — rebuild the index"
+		resp.Status.LatencyMs = int32(time.Since(start).Milliseconds())
+		return resp, nil
+	}
 
 	if len(req.QueryEmbeddingInt8) != 384 {
 		resp.Status.Status = "CONTRACT_ERROR"

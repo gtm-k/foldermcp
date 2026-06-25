@@ -4,6 +4,7 @@ package grpc
 
 import (
 	"context"
+	"database/sql"
 	"net"
 	"path/filepath"
 	"testing"
@@ -14,6 +15,62 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// TestVectorSearchGatedOnIncompatibleIndex pins the central read-side gate:
+// the PUBLIC VectorSearch RPC (and Batch) accept client-supplied int8 codes and
+// never touch the embedder, so the CLI's embedder-nil gate does not protect
+// them. NewServer must refuse vector search when the stored quantization mode
+// is incompatible with this binary's encoder, rather than run KNN on
+// incomparable codes and return silent garbage.
+func TestVectorSearchGatedOnIncompatibleIndex(t *testing.T) {
+	newDB := func(t *testing.T) *sql.DB {
+		t.Helper()
+		db, err := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "s.db"), Tier: store.TierMid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Migrate(db, ""); err != nil {
+			t.Fatal(err)
+		}
+		return db
+	}
+	req := &pb.VectorSearchRequest{QueryEmbeddingInt8: make([]byte, 384), K: 3}
+
+	t.Run("incompatible index degrades", func(t *testing.T) {
+		db := newDB(t)
+		defer func() { _ = db.Close() }()
+		if err := store.WriteFingerprint(db, store.Fingerprint{
+			ModelName: "all-MiniLM-L6-v2", ModelVersion: "2.2.0", Dimension: 384,
+			ChunkingPolicy: "recursive_80_200_260_v1", QuantizationMode: "int8", // legacy per-vector
+		}); err != nil {
+			t.Fatal(err)
+		}
+		srv := NewServer(ServerOpts{DB: db})
+		resp, err := srv.VectorSearch(context.Background(), req)
+		if err != nil {
+			t.Fatalf("VectorSearch: %v", err)
+		}
+		if resp.Status.Status != "DEGRADED" {
+			t.Errorf("status = %q, want DEGRADED — incompatible index must not run KNN", resp.Status.Status)
+		}
+		if len(resp.Results) != 0 {
+			t.Errorf("got %d results, want 0 on incompatible index", len(resp.Results))
+		}
+	})
+
+	t.Run("compatible index is not gated", func(t *testing.T) {
+		db := newDB(t) // fresh DB: no fingerprint → compatible
+		defer func() { _ = db.Close() }()
+		srv := NewServer(ServerOpts{DB: db})
+		resp, err := srv.VectorSearch(context.Background(), req)
+		if err != nil {
+			t.Fatalf("VectorSearch: %v", err)
+		}
+		if resp.Status.Status == "DEGRADED" {
+			t.Errorf("fresh compatible index was gated (DEGRADED): %s", resp.Status.ErrorMessage)
+		}
+	})
+}
 
 func TestServerBootsAndAnswersCapabilities(t *testing.T) {
 	tmp := t.TempDir()

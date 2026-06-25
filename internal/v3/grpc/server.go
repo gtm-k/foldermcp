@@ -11,11 +11,11 @@ import (
 
 	"google.golang.org/grpc"
 
-	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 	"github.com/gtm-k/foldermcp/internal/v3/embed"
 	"github.com/gtm-k/foldermcp/internal/v3/grpc/admin"
 	"github.com/gtm-k/foldermcp/internal/v3/grpc/query"
 	"github.com/gtm-k/foldermcp/internal/v3/grpc/tools"
+	pb "github.com/gtm-k/foldermcp/internal/v3/proto/gen"
 )
 
 // Server assembles all gRPC services and delegates RPC calls to handlers.
@@ -59,6 +59,17 @@ type ServerOpts struct {
 // NewServer creates a fully wired Server with all handlers connected.
 func NewServer(opts ServerOpts) *Server {
 	vec := &query.VectorHandler{DB: opts.DB}
+	// Central read-side gate: if the stored index's quantization mode is
+	// incompatible with this binary's query encoder, refuse vector search at
+	// the handler shared by the VectorSearch RPC, SearchBroadly, and Batch —
+	// rather than compare fixed-scale query codes against an old per-vector
+	// index and return silent garbage. The CLI's embedder-nil path only
+	// covered query-text embedding; a client calling VectorSearch with its own
+	// int8 codes bypassed it. Computed from the DB here so a future NewServer
+	// caller cannot forget to pass it.
+	if ok, _ := embed.SemanticIndexCompatible(opts.DB); !ok {
+		vec.Disabled = true
+	}
 	fts := &query.FTSHandler{DB: opts.DB}
 	fn := &query.FilenameHandler{DB: opts.DB}
 	md := &query.MetadataHandler{DB: opts.DB}
