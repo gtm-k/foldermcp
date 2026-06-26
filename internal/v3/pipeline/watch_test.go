@@ -403,10 +403,15 @@ func TestWatch_UpsertSkipsWalkerExcludedPaths(t *testing.T) {
 		"sub/__pycache__/m.cpython": "bytecode\n",
 		".hidden.md":                "# secret\n",
 	}
-	// Allowed: a normal file (and .env, which the walker's skip rule lets through).
+	// Allowed: a normal file and a normal file inside a non-secret dotfile DIR
+	// (.config is not an ignore-dir, and app.yaml is not a dotfile, so the walker
+	// indexes it). NOTE: .env is intentionally NOT here any more — it now matches
+	// secretDenyGlobs and is DENIED on the watch path (see
+	// TestWatch_UpsertRejectsSecretFiles); the prior "walker lets .env through"
+	// exception was the vulnerability this fix closes.
 	allowed := map[string]string{
-		"doc.md": mdFixture,
-		".env":   "KEY=value\n",
+		"doc.md":           mdFixture,
+		".config/app.yaml": "key: value\n",
 	}
 	for rel, content := range excluded {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
@@ -429,6 +434,9 @@ func TestWatch_UpsertSkipsWalkerExcludedPaths(t *testing.T) {
 	}
 	for rel, content := range allowed {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", rel, err)
 		}
@@ -438,6 +446,62 @@ func TestWatch_UpsertSkipsWalkerExcludedPaths(t *testing.T) {
 		if got := count(t, db, `SELECT COUNT(*) FROM files WHERE path=?`, p); got != 1 {
 			t.Errorf("files row NOT created for allowed path %s (count=%d)", rel, got)
 		}
+	}
+}
+
+// TestWatch_UpsertRejectsSecretFiles (CRITICAL — watch-path secret exposure):
+// the one-shot walker default-denies credential-bearing files (walker A7 Layer 1:
+// .env, *.pem, *.key, id_rsa*, *credentials*, *.keystore, …) so they NEVER enter
+// the files table. The watch path (upsertCandidate) reuses a skip predicate that
+// MUST mirror that deny — otherwise the watcher hashes + inserts a secret-named
+// file on the live edit path, bypassing Layer 1. Ingest redaction (Layer 2) only
+// scrubs KNOWN secret PATTERNS in content, so a .pem body / arbitrary .env value
+// is not all pattern-matched: the file must be EXCLUDED, not merely redacted.
+//
+// This asserts NO files row exists for the secret-named files, while a normal
+// .go file in the same batch IS indexed.
+func TestWatch_UpsertRejectsSecretFiles(t *testing.T) {
+	db := openTestDB(t)
+	dir := t.TempDir()
+	r := newTestRunner(t, db)
+	w := NewWatchLoop(db, r, dir, WatchConfig{}, nil, nil)
+	ctx := context.Background()
+
+	// Secret-named files the walker's secretDenyGlobs reject — must NOT be indexed
+	// on the watch path either.
+	secrets := map[string]string{
+		".env":       "AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE\n",
+		"server.pem": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----\n",
+		"id_rsa":     "-----BEGIN OPENSSH PRIVATE KEY-----\n",
+		"deploy.key": "ssh-rsa AAAA...\n",
+	}
+	for rel, content := range secrets {
+		p := filepath.Join(dir, rel)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+		ok, err := w.upsertCandidate(ctx, p)
+		if err != nil {
+			t.Fatalf("upsertCandidate(%s) returned error: %v", rel, err)
+		}
+		if ok {
+			t.Errorf("upsertCandidate(%s) reported a change for a secret-named file — must be rejected", rel)
+		}
+		if got := count(t, db, `SELECT COUNT(*) FROM files WHERE path=?`, p); got != 0 {
+			t.Errorf("secret file %q entered files table on the watch path (count=%d) — Layer 1 deny bypassed", rel, got)
+		}
+	}
+
+	// A normal source file in the same flow IS indexed.
+	appPath := filepath.Join(dir, "app.go")
+	if err := os.WriteFile(appPath, []byte("package app\n"), 0o644); err != nil {
+		t.Fatalf("write app.go: %v", err)
+	}
+	if _, err := w.upsertCandidate(ctx, appPath); err != nil {
+		t.Fatalf("upsertCandidate(app.go) returned error: %v", err)
+	}
+	if got := count(t, db, `SELECT COUNT(*) FROM files WHERE path=?`, appPath); got != 1 {
+		t.Errorf("app.go indexed on the watch path = %d, want 1", got)
 	}
 }
 

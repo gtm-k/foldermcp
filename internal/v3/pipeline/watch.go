@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -198,24 +197,16 @@ func NewWatchLoop(db *sql.DB, runner *Runner, root string, cfg WatchConfig, metr
 	return w
 }
 
-// walkerIgnoreDirs is the directory-name ignore set the walker prunes
-// (walker.shouldIgnoreDir). REPLICATED here (read-only) rather than imported,
-// because walker.go is owned by a parallel phase this round and exposes no
-// exported predicate. See newDecision: a shared EXPORTED walker.ShouldSkip
-// predicate is the consolidation follow-up so this duplication is removed.
-var walkerIgnoreDirs = map[string]bool{
-	".git": true, ".foldermcp": true, "node_modules": true, "__pycache__": true,
-	".venv": true, "venv": true, "target": true, "dist": true, "build": true,
-}
-
-// walkerIgnoreExcludeGlobs renders the walker's ignore-dir set as watcher
-// exclude globs. compileGlobs auto-derives the top-level form (name/**) from the
-// "**/" prefix, so a single "**/<name>/**" pattern covers both nested and
-// root-level occurrences. Dotfiles are intentionally NOT globbed here (the glob
-// path cannot honour the .env exception); upsertCandidate's skip check does.
+// walkerIgnoreExcludeGlobs renders the walker's ignore-dir set (the SINGLE source
+// of truth, walker.IgnoreDirNames) as watcher exclude globs. compileGlobs
+// auto-derives the top-level form (name/**) from the "**/" prefix, so a single
+// "**/<name>/**" pattern covers both nested and root-level occurrences. Dotfiles
+// and secret-named files are intentionally NOT globbed here (the glob path cannot
+// honour the per-basename rules); upsertCandidate's walker.ShouldSkip check does.
 func walkerIgnoreExcludeGlobs() []string {
-	out := make([]string, 0, len(walkerIgnoreDirs))
-	for name := range walkerIgnoreDirs {
+	names := walker.IgnoreDirNames()
+	out := make([]string, 0, len(names))
+	for _, name := range names {
 		out = append(out, "**/"+name+"/**")
 	}
 	return out
@@ -235,42 +226,6 @@ func mergeExcludes(base, extra []string) []string {
 		}
 	}
 	return out
-}
-
-// walkerWouldSkip replicates walker.shouldIgnoreDir + walker.skipFile for ONE
-// path under root (read-only; walker.go is off-limits this round). It returns
-// true when the walker would never create a files row for path, so the watch
-// loop must not either. Logic mirror:
-//   - any DIRECTORY segment of path (relative to root) whose name is in the
-//     ignore-dir set ⇒ skipped (walker prunes the subtree with SkipDir);
-//   - the FILENAME starts with '.' and is not ".env" ⇒ skipped (walker.skipFile's
-//     dotfile rule). The walker's user IgnoreGlobs are NOT replicated (the watch
-//     loop has no IgnoreGlobs source; the dir + dotfile rules are the divergence
-//     that produced phantom rows).
-//
-// A path outside root (filepath.Rel fails or escapes) is treated as skip — the
-// watch loop only owns paths under its root.
-func walkerWouldSkip(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return true
-	}
-	rel = filepath.ToSlash(rel)
-	if rel == "." || strings.HasPrefix(rel, "../") || rel == ".." {
-		return true
-	}
-	segs := strings.Split(rel, "/")
-	// All segments except the last are directory components.
-	for _, dir := range segs[:len(segs)-1] {
-		if walkerIgnoreDirs[dir] {
-			return true
-		}
-	}
-	base := segs[len(segs)-1]
-	if strings.HasPrefix(base, ".") && base != ".env" {
-		return true
-	}
-	return false
 }
 
 // Metrics returns the loop's metric registry (the one passed in, or the private
@@ -460,12 +415,19 @@ func (w *WatchLoop) processBatch(ctx context.Context) error {
 // whether the row's content actually changed (sha256 differs from the stored
 // row), which is what the storm test asserts.
 func (w *WatchLoop) upsertCandidate(ctx context.Context, path string) (bool, error) {
-	// FIX A (belt #2, authoritative): never insert a files row the walker would
-	// not. The watcher's glob filter (belt #1) is coarse; this per-path check is
-	// the exact mirror of walker.shouldIgnoreDir + walker.skipFile, so the watch
-	// write path cannot diverge from the walker's (phantom pending rows + garbage
-	// embeddings). No hash/classify/stat work happens for a skipped path.
-	if walkerWouldSkip(w.root, path) {
+	// FIX A (belt #2, authoritative) + CRITICAL watch-path secret deny: never
+	// insert a files row the walker would not. This calls the SINGLE exported
+	// walker predicate (walker.ShouldSkip) — the exact same rules Walk applies:
+	// ignore-dirs + dotfile/IgnoreGlobs + the Layer-1 secretDenyGlobs deny
+	// (.env, *.pem, *.key, id_rsa*, *credentials*, …). So the live watch path
+	// cannot diverge from the one-shot walk and a secret-named file is rejected
+	// BEFORE any hash/classify/stat work — never entering the index.
+	//
+	// includeSecrets=false (secure default): watch mode does not opt back into
+	// indexing credential-bearing files. The watch loop carries no per-run
+	// IgnoreGlobs source, so it passes nil (matches NewWatchLoop, which forwards
+	// only the ignore-dir excludes to the poller).
+	if walker.ShouldSkip(w.root, path, false, nil) {
 		return false, nil
 	}
 	sum, err := walker.HashFile(path)
