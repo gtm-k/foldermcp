@@ -5,6 +5,7 @@ package walker
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -108,6 +109,12 @@ func ShouldSkip(root, path string, includeSecrets bool, ignoreGlobs []string) bo
 // orchestrator (Phase C pipeline.go), which compares last_seen against
 // the current run's timestamp after the walk completes.
 func Walk(ctx context.Context, db *sql.DB, opts Options) (int, error) {
+	// Validate user IgnoreGlobs up front. A malformed glob is a CONFIG ERROR that
+	// must surface as a visible error here — not silently drop through skipFile and
+	// index a file the user tried to exclude (the MEDIUM fail-open).
+	if err := ValidateIgnoreGlobs(opts.IgnoreGlobs); err != nil {
+		return 0, err
+	}
 	if opts.BatchSize == 0 {
 		opts.BatchSize = 100
 	}
@@ -240,9 +247,32 @@ func shouldIgnoreDir(name string) bool {
 	return false
 }
 
+// ValidateIgnoreGlobs reports the first malformed pattern in globs. Options.
+// IgnoreGlobs are USER-supplied gitignore-style globs, so a bad pattern is a
+// CONFIG ERROR: it must surface as a visible error rather than silently changing
+// indexing behavior. filepath.Match errors only on the PATTERN (ErrBadPattern),
+// never on the name, so probing each glob against a fixed name detects a bad
+// pattern up front. Walk calls this before walking so the user is told their
+// ignore pattern is broken — not given silently-wrong indexing (a fail-open that
+// would index a file the user meant to exclude). The returned error wraps
+// filepath.ErrBadPattern and names the offending pattern.
+func ValidateIgnoreGlobs(globs []string) error {
+	for _, g := range globs {
+		if _, err := filepath.Match(g, "probe"); err != nil {
+			return fmt.Errorf("invalid IgnoreGlob %q: %w", g, err)
+		}
+	}
+	return nil
+}
+
 func skipFile(name string, globs []string) bool {
 	for _, g := range globs {
-		if ok, _ := filepath.Match(g, name); ok {
+		// Fail CLOSED on a malformed pattern (matches matchesSecretDeny). Walk
+		// validates IgnoreGlobs up front (ValidateIgnoreGlobs), so for a validated
+		// Walk this err branch never fires; it removes the fail-OPEN shape for any
+		// other caller that skips validation — a bad glob skips the file rather than
+		// silently indexing every name it was meant to exclude.
+		if ok, err := filepath.Match(g, name); err != nil || ok {
 			return true
 		}
 	}

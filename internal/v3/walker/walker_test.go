@@ -4,8 +4,10 @@ package walker
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gtm-k/foldermcp/internal/v3/store"
@@ -23,6 +25,78 @@ func TestMatchesSecretDeny_FailsClosedOnBadPattern(t *testing.T) {
 	secretDenyGlobs = []string{"["}
 	if !matchesSecretDeny("anything.txt") {
 		t.Error("matchesSecretDeny returned false on a malformed glob — must fail CLOSED (exclude the file)")
+	}
+}
+
+// TestValidateIgnoreGlobs checks the upfront config validation helper: valid
+// globs return nil, a malformed glob ("[" — unterminated char class) returns a
+// wrapped filepath.ErrBadPattern naming the bad pattern.
+func TestValidateIgnoreGlobs(t *testing.T) {
+	if err := ValidateIgnoreGlobs([]string{"*.tmp", "vendor/*", "a?b"}); err != nil {
+		t.Errorf("ValidateIgnoreGlobs(valid) = %v, want nil", err)
+	}
+	if err := ValidateIgnoreGlobs(nil); err != nil {
+		t.Errorf("ValidateIgnoreGlobs(nil) = %v, want nil", err)
+	}
+	err := ValidateIgnoreGlobs([]string{"*.tmp", "["})
+	if err == nil {
+		t.Fatal("ValidateIgnoreGlobs([\"[\"]) = nil, want error on the malformed glob")
+	}
+	if !errors.Is(err, filepath.ErrBadPattern) {
+		t.Errorf("error = %v, want wrapped filepath.ErrBadPattern", err)
+	}
+	if !strings.Contains(err.Error(), "[") {
+		t.Errorf("error %q should name the bad pattern %q", err.Error(), "[")
+	}
+}
+
+// TestWalkRejectsMalformedIgnoreGlob (MEDIUM fail-open): a malformed user
+// IgnoreGlob is a CONFIG ERROR. Walk must validate up front and RETURN the error
+// rather than silently dropping it and indexing files the user tried to ignore
+// (fail-open) — and rather than indexing nothing (naive fail-closed). Fails first
+// on the old code, where skipFile dropped filepath.Match's ErrBadPattern.
+func TestWalkRejectsMalformedIgnoreGlob(t *testing.T) {
+	walkRoot := t.TempDir()
+	dbDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(walkRoot, "secret.tmp"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := store.Open(store.Options{Path: filepath.Join(dbDir, "w.db"), Tier: store.TierMid})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := store.Migrate(db, ""); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// "[" is an unterminated character class — filepath.Match returns ErrBadPattern.
+	_, err = Walk(context.Background(), db, Options{Root: walkRoot, IgnoreGlobs: []string{"["}})
+	if err == nil {
+		t.Fatal("Walk with a malformed IgnoreGlob returned nil — must surface the config error, not silently mis-index")
+	}
+	if !errors.Is(err, filepath.ErrBadPattern) {
+		t.Errorf("Walk error = %v, want wrapped filepath.ErrBadPattern", err)
+	}
+	// And it must NOT have silently indexed anything.
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM files`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("file count = %d after Walk rejected a bad glob, want 0 (no silent indexing)", count)
+	}
+}
+
+// TestSkipFileFailsClosedOnBadPattern: even a caller that bypasses upfront
+// validation must not fail OPEN. skipFile (via ShouldSkip) must treat a malformed
+// glob's ErrBadPattern as a match (skip the file), matching matchesSecretDeny.
+func TestSkipFileFailsClosedOnBadPattern(t *testing.T) {
+	root := filepath.FromSlash("/root")
+	path := filepath.Join(root, "anything.txt")
+	if !ShouldSkip(root, path, true, []string{"["}) {
+		t.Error("ShouldSkip with a malformed ignore glob returned false — skipFile must fail CLOSED (skip the file)")
 	}
 }
 
