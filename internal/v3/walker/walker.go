@@ -35,6 +35,13 @@ var secretDenyGlobs = []string{
 	"*.p12", "*.pfx", "*credentials*", "*.keystore",
 }
 
+// MatchesSecretDeny reports whether a filename matches any default secret-deny
+// glob (.env, .env.*, *.env, *.pem, *.key, id_rsa*, *.p12, *.pfx, *credentials*,
+// *.keystore). Exported so the watch path (pipeline.upsertCandidate) applies the
+// SAME Layer-1 deny as the one-shot Walk — a single source of truth, no replicated
+// copy. See ShouldSkip for the full per-path predicate.
+func MatchesSecretDeny(name string) bool { return matchesSecretDeny(name) }
+
 // matchesSecretDeny reports whether name matches any default secret-deny glob.
 func matchesSecretDeny(name string) bool {
 	lower := strings.ToLower(name)
@@ -48,6 +55,48 @@ func matchesSecretDeny(name string) bool {
 		}
 	}
 	return false
+}
+
+// ShouldSkip is the single source of truth for whether the indexer must NOT
+// create a files row for path (relative to root). It applies EVERY rule Walk
+// applies, in the same order:
+//
+//   - any DIRECTORY segment of path whose name is in shouldIgnoreDir
+//     (.git, node_modules, build dirs, …) ⇒ skip (Walk prunes the subtree);
+//   - the secretDenyGlobs / matchesSecretDeny check on the basename
+//     (.env, *.pem, *.key, id_rsa*, *credentials*, …) unless includeSecrets
+//     ⇒ skip (Phase 7 Layer 1, D17 — credential-bearing files never index);
+//   - the skipFile dotfile/IgnoreGlobs rule on the basename ⇒ skip.
+//
+// Both Walk (per visited entry) and the watch path (pipeline.upsertCandidate,
+// per changed file) call this ONE predicate so the live-edit path can never
+// diverge from the one-shot walk. A path outside root (Rel fails or escapes)
+// is treated as skip — the indexer only owns paths under root.
+//
+// includeSecrets mirrors Options.IncludeSecrets: when true the secret-deny
+// check is disabled (explicit opt-in). ignoreGlobs mirrors Options.IgnoreGlobs.
+func ShouldSkip(root, path string, includeSecrets bool, ignoreGlobs []string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return true
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return true
+	}
+	segs := strings.Split(rel, "/")
+	// All segments except the last are directory components.
+	for _, dir := range segs[:len(segs)-1] {
+		if shouldIgnoreDir(dir) {
+			return true
+		}
+	}
+	base := segs[len(segs)-1]
+	// Layer 1 secret hygiene (D17): default-deny credential-bearing files.
+	if !includeSecrets && matchesSecretDeny(base) {
+		return true
+	}
+	return skipFile(base, ignoreGlobs)
 }
 
 // Walk enumerates Root and upserts one row per file into the files table.
@@ -105,17 +154,19 @@ ON CONFLICT(path) DO UPDATE SET
 			return ctx.Err()
 		}
 		if d.IsDir() {
+			// Prune ignored subtrees up front (SkipDir avoids descending). The
+			// per-file ShouldSkip below re-checks ancestor segments, so this is an
+			// optimization, not the authoritative guard.
 			if shouldIgnoreDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		// Layer 1 secret hygiene (D17): default-deny credential-bearing files so
-		// they never enter the files table — overridable by IncludeSecrets.
-		if !opts.IncludeSecrets && matchesSecretDeny(d.Name()) {
-			return nil
-		}
-		if skipFile(d.Name(), opts.IgnoreGlobs) {
+		// Single source of truth: secret-deny (Layer 1, D17, overridable by
+		// IncludeSecrets) + dotfile/IgnoreGlobs rule. ShouldSkip is the SAME
+		// predicate the watch path (pipeline.upsertCandidate) calls, so the live
+		// path can never diverge from this one-shot walk.
+		if ShouldSkip(opts.Root, path, opts.IncludeSecrets, opts.IgnoreGlobs) {
 			return nil
 		}
 
@@ -164,10 +215,27 @@ type fileRow struct {
 	parent string
 }
 
+// ignoreDirNames is the directory-name ignore set Walk prunes via SkipDir.
+// Single source of truth for both shouldIgnoreDir and IgnoreDirNames (the watch
+// path's belt-#1 watcher excludes derive from it, so they cannot drift).
+var ignoreDirNames = []string{
+	".git", ".foldermcp", "node_modules", "__pycache__", ".venv", "venv", "target", "dist", "build",
+}
+
+// IgnoreDirNames returns the directory names Walk prunes (.git, node_modules,
+// build dirs, …). Exported so the watch path forwards the SAME set to the
+// underlying poller as watcher excludes (belt #1) without a replicated copy.
+func IgnoreDirNames() []string {
+	out := make([]string, len(ignoreDirNames))
+	copy(out, ignoreDirNames)
+	return out
+}
+
 func shouldIgnoreDir(name string) bool {
-	switch name {
-	case ".git", ".foldermcp", "node_modules", "__pycache__", ".venv", "venv", "target", "dist", "build":
-		return true
+	for _, n := range ignoreDirNames {
+		if name == n {
+			return true
+		}
 	}
 	return false
 }
