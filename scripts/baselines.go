@@ -397,7 +397,8 @@ type baselineConfig struct {
 	corpus          string
 	rgBin           string
 	pdftotextBin    string // "" if unavailable
-	callBudget      int
+	callBudget      int    // rg-search + confirm-read budget per query (floor 8)
+	pdfBudget       int    // SEPARATE pdftotext-extraction budget per query (floor 8)
 	readWindowLines int
 	readTopN        int
 }
@@ -566,12 +567,20 @@ func gatherMatches(ctx context.Context, cfg baselineConfig, terms []SearchTerm, 
 	}
 
 	// PDF stratum: rg cannot read PDF text, so extract with pdftotext (if present).
-	// SEPARATE budget so a multi-term rg expansion can never starve PDF extraction.
+	// SEPARATE budget (cfg.pdfBudget, floor 8) so a multi-term rg expansion can
+	// never starve PDF extraction — extracting a PDF's text layer is a
+	// once-per-file operation, not a search-refinement step competing with rg
+	// synonym calls (D16; see docs/bench-methodology.md §5).
 	if cfg.pdftotextBin != "" {
-		pdfs, _ := findPDFs(cfg.corpus)
+		pdfs, walkErr := findPDFs(cfg.corpus)
+		if walkErr != nil {
+			// A discovery walk error can hide PDFs from the baseline — surface it
+			// rather than silently under-covering the stratum.
+			fmt.Fprintf(os.Stderr, "  [agentic-grep] PDF discovery under %q errored: %v — PDF coverage may be partial\n", cfg.corpus, walkErr)
+		}
 		pdfs = orderPDFsByQuery(pdfs, terms)
-		pdfBudget := clampBudget(cfg.callBudget)
-		pdfCalls := 0
+		pdfBudget := clampBudget(cfg.pdfBudget)
+		pdfCalls, pdfErrs := 0, 0
 		for _, p := range pdfs {
 			if pdfCalls >= pdfBudget {
 				break
@@ -579,10 +588,18 @@ func gatherMatches(ctx context.Context, cfg baselineConfig, terms []SearchTerm, 
 			txt, err := pdftotextRun(ctx, cfg.pdftotextBin, p)
 			pdfCalls++
 			if err != nil {
-				continue // pdftotext failure on one file is non-fatal (warned upfront)
+				// VISIBLE failure (Codex MEDIUM): a corrupt/unreadable PDF dropping
+				// out of recall + token accounting with no signal makes a partial
+				// result look complete.
+				pdfErrs++
+				fmt.Fprintf(os.Stderr, "  [agentic-grep] pdftotext %q: %v\n", p, err)
+				continue
 			}
 			ledger.addRead(txt)
 			matches = append(matches, scanTextForTerms(p, txt, terms)...)
+		}
+		if pdfErrs > 0 {
+			fmt.Fprintf(os.Stderr, "  [agentic-grep] %d PDF extraction(s) failed under %q — PDF-stratum coverage is partial\n", pdfErrs, cfg.corpus)
 		}
 	}
 	return matches, calls, nil
@@ -665,7 +682,24 @@ func runRawRead(ctx context.Context, cfg baselineConfig, q Query) ([]string, int
 		}
 		seen[c.Path] = true
 		if strings.EqualFold(filepath.Ext(c.Path), ".pdf") {
-			continue // PDF text is not a wholesale text read (extracted in discovery)
+			// The index-less agent must still ingest the PDF to answer; its
+			// wholesale surface is the FULL extracted text layer. Counting only the
+			// query here (Codex HIGH) left the raw-read denominator at ~0 for PDF
+			// wins, making the tokens<=0.1x raw-read gate meaningless for PDFs.
+			if cfg.pdftotextBin == "" {
+				readErrs++
+				fmt.Fprintf(os.Stderr, "  [raw-read] %q is a PDF but pdftotext is unavailable — its text is omitted from the denominator\n", c.Path)
+				continue
+			}
+			txt, err := pdftotextRun(ctx, cfg.pdftotextBin, c.Path)
+			if err != nil {
+				readErrs++
+				fmt.Fprintf(os.Stderr, "  [raw-read] pdftotext %q: %v\n", c.Path, err)
+				continue
+			}
+			ledger.addRead(txt) // full extracted text = the wholesale read for a PDF
+			reads++
+			continue
 		}
 		data, err := os.ReadFile(c.Path) // wholesale read — the point of this baseline
 		if err != nil {

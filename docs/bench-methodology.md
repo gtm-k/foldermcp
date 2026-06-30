@@ -31,7 +31,8 @@ baselines a skeptic would reach for first?** The two skeptic baselines are:
   index-less agent still has to *find* candidate files (it greps for them), but
   then reads the top candidates **wholesale** instead of relying on retrieved
   snippets — what you pay if you skip the retrieval index entirely. Only the
-  model-ingested surface is counted (query in + full file contents out); the grep
+  model-ingested surface is counted (query in + full file contents out — for a
+  PDF candidate, its full extracted text layer); the grep
   used to *pick* the files is discovery I/O and is excluded, exactly as hybrid's
   index-internal work is excluded, so the two surfaces are identical (§5).
 
@@ -166,8 +167,11 @@ Practical consequences:
   mode and is documented, not a fairness lever for the gate, which compares
   hybrid vs. agentic-grep vs. raw-read.)
 - **agentic-grep budget split.** The agent's ripgrep search loop and its PDF
-  text-layer extraction (`pdftotext`) draw from **separate** per-query budgets
-  (each clamped to the D16 floor of 8). A natural-language query that expands to
+  text-layer extraction (`pdftotext`) draw from **separate** per-query budgets,
+  exposed as two explicit flags — `-call-budget` (rg search + confirm reads) and
+  `-pdf-budget` (extraction) — each clamped to the D16 floor of 8. The worst-case
+  per-query tool calls is their sum, by design, so a reviewer can read and bound
+  each independently. A natural-language query that expands to
   many rg terms therefore can never exhaust the budget before a single PDF is
   extracted — extracting a PDF's text is a once-per-file operation an agent
   "using grep well" always performs, not a search-refinement step competing with
@@ -184,7 +188,8 @@ Practical consequences:
 - **Identical token surface (hybrid vs. raw-read).** Both are counted over the
   same model-ingested surface: **query text in**, and the response payload out —
   `path+title+snippet` per hit for hybrid vs. **full file contents** for
-  raw-read. Neither counts its *discovery* machinery: hybrid excludes the index's
+  raw-read (for a PDF, its full extracted text layer — not skipped). Neither
+  counts its *discovery* machinery: hybrid excludes the index's
   internal lexical/vector/RRF work, and raw-read excludes the grep + `pdftotext`
   it uses only to choose which files to read wholesale. (Earlier the raw-read
   denominator folded in ~one full-corpus rg scan per reformulated term plus every
@@ -198,6 +203,10 @@ Practical consequences:
   raw-read on a discovery error — independent failure modes — so summing totals
   over non-identical sets could silently flatter the ratio; the harness instead
   sums only common queries and warns on stderr when the sets differ.
+- **Visible partial extraction.** A `pdftotext` failure or a PDF-discovery walk
+  error is logged to stderr with the file path and counted; a silently-partial
+  PDF stratum (e.g. one corrupt file dropping out of recall + token accounting)
+  cannot masquerade as complete (actor-observability).
 
 ## 6. Pre-registration and freeze (Decision D11)
 

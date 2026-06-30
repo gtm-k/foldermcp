@@ -30,8 +30,11 @@ import (
 //   - csv  : structuredDataExts in internal/v3/walker/binary.go
 //   - code/prose : classFromExtOrMime in internal/v3/walker/mime.go
 const (
-	stratumCode  = "code"
-	stratumProse = "prose"
+	stratumCode = "code"
+	// stratumProse emits "md" (not "prose") so the JSON per_stratum key matches
+	// the published methodology, schema, and manifests for the Markdown/prose
+	// stratum. The Go identifier stays stratumProse; only the wire value is "md".
+	stratumProse = "md"
 	stratumPDF   = "pdf"
 	stratumCSV   = "csv"
 	stratumOther = "other"
@@ -115,24 +118,46 @@ func recallAtKPaths(paths []string, judgments []Judgment, k int) float64 {
 }
 
 // ndcgAtKPaths = DCG@k / IDCG@k with gain 2^grade-1 and log2(rank+1) discount.
+//
+// Each DISTINCT relevant document is credited at most ONCE, at its earliest rank
+// (mirroring recallAtKPaths' distinct-doc denominator), and IDCG is computed over
+// the count of distinct relevant docs. Without this, a relevant file that yields
+// two hits in the top-k double-counts its gain and NDCG can exceed 1.0 —
+// corrupting the reported metric the kill-gate reads.
 func ndcgAtKPaths(paths []string, judgments []Judgment, k int) float64 {
-	gradeMap := make(map[string]int)
+	// distinct relevant docs -> highest grade
+	gradeByPath := make(map[string]int)
 	for _, j := range judgments {
-		gradeMap[j.Path] = j.Grade
+		if j.Grade > gradeByPath[j.Path] {
+			gradeByPath[j.Path] = j.Grade
+		}
 	}
 
 	dcg := 0.0
+	credited := make(map[string]bool)
 	for i, p := range paths {
 		if i >= k {
 			break
 		}
-		rel := hitRelevance(p, gradeMap)
-		dcg += (math.Pow(2, float64(rel)) - 1) / math.Log2(float64(i+2))
+		// Credit the highest-grade not-yet-credited relevant doc this hit matches.
+		bestGrade, bestPath := 0, ""
+		for rp, g := range gradeByPath {
+			if g > 0 && !credited[rp] && strings.Contains(p, rp) && g > bestGrade {
+				bestGrade, bestPath = g, rp
+			}
+		}
+		if bestPath != "" {
+			credited[bestPath] = true
+			dcg += (math.Pow(2, float64(bestGrade)) - 1) / math.Log2(float64(i+2))
+		}
 	}
 
-	grades := make([]int, 0, len(judgments))
-	for _, j := range judgments {
-		grades = append(grades, j.Grade)
+	// IDCG over DISTINCT relevant docs (grade > 0), grades descending.
+	grades := make([]int, 0, len(gradeByPath))
+	for _, g := range gradeByPath {
+		if g > 0 {
+			grades = append(grades, g)
+		}
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(grades)))
 

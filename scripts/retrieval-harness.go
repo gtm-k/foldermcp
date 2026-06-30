@@ -92,7 +92,8 @@ func main() {
 		jsonStdout = flag.Bool("json", false, "emit JSON results to stdout (human output is routed to stderr)")
 		rgBin      = flag.String("rg", "rg", "ripgrep binary for the agentic-grep/raw-read baselines")
 		pdfBin     = flag.String("pdftotext", "pdftotext", "pdftotext binary for the pdf stratum")
-		callBudget = flag.Int("call-budget", defaultCallBudget, "per-query tool-call budget for agentic-grep (floor 8; PILOT placeholder)")
+		callBudget = flag.Int("call-budget", defaultCallBudget, "per-query rg-search + confirm-read budget for agentic-grep (floor 8; PILOT placeholder)")
+		pdfBudget  = flag.Int("pdf-budget", defaultCallBudget, "per-query pdftotext-extraction budget, SEPARATE from -call-budget (floor 8; PILOT placeholder)")
 		readWindow = flag.Int("read-window", defaultReadWindowLines, "± lines for agentic-grep bounded window reads")
 		readTopN   = flag.Int("read-topn", defaultReadTopN, "top candidates confirmed (agentic) / read whole (raw-read)")
 	)
@@ -202,6 +203,7 @@ func main() {
 			corpus:          *corpus,
 			rgBin:           *rgBin,
 			callBudget:      *callBudget,
+			pdfBudget:       *pdfBudget,
 			readWindowLines: *readWindow,
 			readTopN:        *readTopN,
 		}
