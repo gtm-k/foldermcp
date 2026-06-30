@@ -92,6 +92,11 @@ fi
 echo ""
 
 echo "== running retrieval harness =="
-go run -tags harness "$REPO/scripts/retrieval-harness.go" \
+# NOTE: the harness is now a multi-file package (retrieval-harness.go +
+# metrics.go + baselines.go), so it must be run as the package `./scripts`,
+# not a single .go file. -corpus enables the agentic-grep + raw-read baselines
+# (requires `rg` on PATH; `pdftotext` for the pdf stratum).
+go run -tags harness "$REPO/scripts" \
     -labeled "$LABELED" \
-    -socket "$SOCK"
+    -socket "$SOCK" \
+    -corpus "$FIXTURE"

@@ -1,0 +1,175 @@
+# =============================================================================
+# PILOT SET — grades are AI-drafted and NOT user-approved; for harness
+# validation only. The frozen >=100-query set with user-approved grades is
+# Phase 9c.
+# =============================================================================
+#
+# Purpose: exercise the retrieval harness end-to-end against the OFFLINE pilot
+# corpus assembled by scripts/bench/build-corpus.sh --pilot. These queries
+# validate the MACHINERY (modes, fusion, metrics, JSON, baselines) — they are
+# NOT a measurement of retrieval quality. Do not draw quality conclusions from
+# 13 unapproved queries over 26 files.
+#
+# Schema (matches scripts/retrieval-harness.go LabeledQuerySet/Query/Judgment):
+#   version: int
+#   queries: [ { id, text, persona, judgments: [ { path, symbol, grade } ] } ]
+#
+#   path  = substring matched against the indexed hit path (NOT exact). Each
+#           path below is a unique tail within the pilot corpus tree.
+#   grade = 0 not relevant | 1 somewhat | 2 highly (directly answers).
+#
+# Stratification (>=2 per required bucket):
+#   pdf-answerable : p001, p002          (+ xn003)
+#   csv-answerable : c001, c002          (+ xn004)
+#   code           : code001, code002, code003 (+ xn001)
+#   md             : md001, md002        (+ xn002)
+#   cross-naming   : xn001..xn004  (concept != identifier; grep is weak because
+#                    the query vocabulary does not literally appear in the file)
+#
+# Corpus anchors verified against fixture content on 2026-06-30:
+#   multi_page.pdf page1 = "quasar telemetry", page2 = "photosynthesis pipelines"
+#   data.csv = header name,type,status; rows calculator/tool/enabled,
+#              api-guide/resource/pending, diagram/resource/pending.
+
+version: 1
+set_id: m2-pilot
+status: PILOT-UNAPPROVED
+queries:
+
+  # ── pdf-answerable (target: docs-pdf/multi_page.pdf) ──
+  - id: p001
+    text: "quasar telemetry"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/multi_page.pdf
+        symbol: ""
+        grade: 2
+
+  - id: p002
+    text: "photosynthesis pipelines"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: docs-pdf/multi_page.pdf
+        symbol: ""
+        grade: 2
+
+  # ── csv-answerable (target: data/data.csv) ──
+  - id: c001
+    text: "calculator tool enabled"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: data/data.csv
+        symbol: ""
+        grade: 2
+
+  - id: c002
+    text: "api-guide resource pending status"
+    persona: devops
+    author: synthetic
+    judgments:
+      - path: data/data.csv
+        symbol: ""
+        grade: 2
+
+  # ── code (targets: micro code fixtures) ──
+  - id: code001
+    text: "exponential backoff retry logic for HTTP requests"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-python/session_manager.py
+        symbol: SessionManager
+        grade: 2
+
+  - id: code002
+    text: "bounded concurrent task queue with graceful shutdown"
+    persona: tech-enthusiast
+    author: synthetic
+    judgments:
+      - path: code-go/worker_pool.go
+        symbol: WorkerPool
+        grade: 2
+
+  - id: code003
+    text: "strict versus lenient data validation modes"
+    persona: researcher
+    author: synthetic
+    judgments:
+      - path: code-python/data_pipeline.py
+        symbol: ValidationLevel
+        grade: 2
+
+  # ── md (targets: micro docs) ──
+  - id: md001
+    text: "high-level system architecture components and data flow"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/architecture.md
+        symbol: ""
+        grade: 2
+
+  - id: md002
+    text: "REST endpoint specifications with request and response tables"
+    persona: writer
+    author: synthetic
+    judgments:
+      - path: docs-markdown/api-reference.md
+        symbol: ""
+        grade: 2
+
+  # ── cross-naming: concept != identifier; grep is weak ──
+  # The query wording deliberately avoids the file's literal tokens so a pure
+  # lexical/grep baseline under-retrieves and semantic/hybrid must carry it.
+
+  - id: xn001
+    text: "fetch, update, and remove records through a type-safe generic interface"
+    persona: tech-enthusiast
+    author: synthetic
+    # Target repository.go: Go generics Repository[T Entity] with Get/Create/
+    # Update/Delete. Query says fetch/update/remove/records/type-safe — none of
+    # which are the file's identifiers (CRUD/Get/Delete/Entity). grep is weak.
+    judgments:
+      - path: code-go/repository.go
+        symbol: Repository
+        grade: 2
+
+  - id: xn002
+    text: "write-ahead logging chosen to allow non-blocking concurrent readers during indexing"
+    persona: devops
+    author: synthetic
+    # Target meeting-notes.md: discusses journal_mode=WAL / "WAL mode" for
+    # concurrent reads. The expanded term "write-ahead logging" never appears
+    # literally, so grep on it misses; concept match required.
+    judgments:
+      - path: docs-prose/meeting-notes.md
+        symbol: ""
+        grade: 2
+
+  - id: xn003
+    text: "minimum amount of page text required before a PDF page is worth indexing"
+    persona: researcher
+    author: synthetic
+    # Target multi_page.pdf: prose describes an "extraction quality gate" and a
+    # "minimum character threshold" per page. Query phrases the concept without
+    # the file's literal wording. grade 1 (describes the meta-criterion, not a
+    # crisp factoid answer).
+    judgments:
+      - path: docs-pdf/multi_page.pdf
+        symbol: ""
+        grade: 1
+
+  - id: xn004
+    text: "inventory of items with their category and current state"
+    persona: devops
+    author: synthetic
+    # Target data.csv: columns name/type/status. None of inventory/items/
+    # category/current-state appear literally — pure concept mapping, grep fully
+    # weak. grade 1 (thin schema; somewhat-relevant answer).
+    judgments:
+      - path: data/data.csv
+        symbol: ""
+        grade: 1

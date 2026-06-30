@@ -1,0 +1,165 @@
+# M2 Phase 9 PILOT corpus manifest — OFFLINE.
+#
+# Assembles a tiny pilot corpus by COPYING git-tracked in-repo testdata fixtures
+# (no network). This validates the benchmark machinery end-to-end. It is NOT the
+# frozen >=1000-file corpus — that is Phase 9b, authored against the FROZEN
+# variant of this schema (url + sha256 + license). See corpus-manifest.schema.md.
+#
+# Schema (pilot variant): each entry has id, stratum, license, src, dest.
+#   src  = repo-relative path of an existing tracked fixture (copied verbatim)
+#   dest = corpus-relative destination (forward slashes, unique tail substrings)
+#
+# Coverage: 26 files = 16 code + 5 md + 3 pdf + 2 data.
+# This is the OFFLINE-tracked maximum; the ~30-50 target and the >=1000 frozen
+# corpus require the network download path (Phase 9b). See build-corpus.sh.
+
+version: 1
+mode: pilot
+corpus_id: bench-v1-pilot
+
+entries:
+
+  # ── code: micro Go fixtures (tree-sitter -> code_ast) ──
+  - id: code-go-config
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-go/config.go
+    dest: code-go/config.go
+  - id: code-go-middleware
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-go/middleware.go
+    dest: code-go/middleware.go
+  - id: code-go-repository
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-go/repository.go
+    dest: code-go/repository.go
+  - id: code-go-worker-pool
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-go/worker_pool.go
+    dest: code-go/worker_pool.go
+
+  # ── code: micro Python fixtures ──
+  - id: code-py-cache
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-python/cache.py
+    dest: code-python/cache.py
+  - id: code-py-cli
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-python/cli.py
+    dest: code-python/cli.py
+  - id: code-py-data-pipeline
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-python/data_pipeline.py
+    dest: code-python/data_pipeline.py
+  - id: code-py-session-manager
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/v3/micro/code-python/session_manager.py
+    dest: code-python/session_manager.py
+
+  # ── code: extra Python/TS/JS/shell fixtures (broaden the code stratum) ──
+  - id: code-py-decorated-tools
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/python_decorator/decorated_tools.py
+    dest: code-python-extra/decorated_tools.py
+  - id: code-py-data-tool
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/python_deps/data_tool.py
+    dest: code-python-extra/data_tool.py
+  - id: code-py-math-tools
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/python_simple/math_tools.py
+    dest: code-python-extra/math_tools.py
+  - id: code-py-string-tools
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/python_simple/string_tools.py
+    dest: code-python-extra/string_tools.py
+  - id: code-js-api-client
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/typescript_simple/api_client.js
+    dest: code-ts/api_client.js
+  - id: code-ts-math-tools
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/typescript_simple/math_tools.ts
+    dest: code-ts/math_tools.ts
+  - id: code-sh-deploy
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/shell_simple/deploy.sh
+    dest: code-shell/deploy.sh
+  - id: code-sh-health-check
+    stratum: code
+    license: repo-internal-fixture
+    src: testdata/shell_simple/health_check.sh
+    dest: code-shell/health_check.sh
+
+  # ── md: prose + markdown docs (prose chunker) ──
+  - id: md-api-reference
+    stratum: md
+    license: repo-internal-fixture
+    src: testdata/v3/micro/docs-markdown/api-reference.md
+    dest: docs-markdown/api-reference.md
+  - id: md-architecture
+    stratum: md
+    license: repo-internal-fixture
+    src: testdata/v3/micro/docs-markdown/architecture.md
+    dest: docs-markdown/architecture.md
+  - id: md-meeting-notes
+    stratum: md
+    license: repo-internal-fixture
+    src: testdata/v3/micro/docs-prose/meeting-notes.md
+    dest: docs-prose/meeting-notes.md
+  - id: md-research-notes
+    stratum: md
+    license: repo-internal-fixture
+    src: testdata/v3/micro/docs-prose/research-notes.md
+    dest: docs-prose/research-notes.md
+  - id: md-guide
+    stratum: md
+    license: repo-internal-fixture
+    src: testdata/resources/guide.md
+    dest: docs-markdown-extra/guide.md
+
+  # ── pdf: extraction fixtures (ChunkPDF; needs pdftotext on PATH) ──
+  # Only multi_page.pdf carries extractable prose ("quasar telemetry" p1,
+  # "photosynthesis pipelines" p2). empty_text + scanned_like are negative/edge
+  # fixtures and are NOT positive-judgment targets.
+  - id: pdf-multi-page
+    stratum: pdf
+    license: repo-internal-fixture
+    src: testdata/v3/pdf/multi_page.pdf
+    dest: docs-pdf/multi_page.pdf
+  - id: pdf-empty-text
+    stratum: pdf
+    license: repo-internal-fixture
+    src: testdata/v3/pdf/empty_text.pdf
+    dest: docs-pdf/empty_text.pdf
+  - id: pdf-scanned-like
+    stratum: pdf
+    license: repo-internal-fixture
+    src: testdata/v3/pdf/scanned_like.pdf
+    dest: docs-pdf/scanned_like.pdf
+
+  # ── csv/data: structured-data fixtures (ChunkCSV / data_structured) ──
+  - id: data-csv-sample
+    stratum: csv
+    license: repo-internal-fixture
+    src: testdata/resources/data.csv
+    dest: data/data.csv
+  - id: data-openapi-petstore
+    stratum: csv
+    license: repo-internal-fixture
+    src: testdata/openapi_simple/petstore.yaml
+    dest: data/petstore.yaml
