@@ -11,4 +11,10 @@ its pinned upstream URL. Attribution for CC-BY sources is recorded below.
   vuejs/core             MIT                code (200 files) https://github.com/vuejs/core/tree/c0606e91798c8dca4f33d101e1dd836d672592c1
   rust-lang/book         MIT-OR-Apache-2.0  md (111 files) https://github.com/rust-lang/book/tree/8cc0cb138998ee0502504ca1247b51de9161197c
   kubernetes/website     CC-BY-4.0          md (150 files) https://github.com/kubernetes/website/tree/d41a4597a8bc5e3983a35f85eb62765037da796b
-## TOTAL: 815 entries
+  rfordatascience/tidytuesday CC0-1.0            csv (40 files) https://github.com/rfordatascience/tidytuesday/tree/f55f1f30735a689efa3de1877b9d641d934eaf0f
+  datasets/gdp           ODC-PDDL-1.0       csv (2 files) https://github.com/datasets/gdp/tree/f5b773571a8bf0dc9acebd3f7ffcf975598ab591
+  datasets/population    ODC-PDDL-1.0       csv (1 files) https://github.com/datasets/population/tree/425fc447a53a26c767a15a7de60c4cc2478a0595
+  datasets/country-codes ODC-PDDL-1.0       csv (7 files) https://github.com/datasets/country-codes/tree/caa72d1e0e5af8876c170bb36a9e4d64a01bba88
+  datasets/airport-codes ODC-PDDL-1.0       csv (1 files) https://github.com/datasets/airport-codes/tree/5fef52d0743c7d0adb9fee950cad311d0e547edf
+  datasets/language-codes ODC-PDDL-1.0       csv (4 files) https://github.com/datasets/language-codes/tree/4e4e7f422585150bffde9b28b077f1f270a3d401
+## TOTAL: 870 entries

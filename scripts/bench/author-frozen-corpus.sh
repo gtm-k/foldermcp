@@ -32,7 +32,7 @@ log() { echo "[author] $*" >&2; }
   echo "version: 1"
   echo "mode: frozen"
   echo "corpus_id: bench-v1"
-  echo "# WIP: authored tiers = code, md. Pending: csv, pdf, gutenberg."
+  echo "# WIP: authored tiers = code, md, csv. Pending: pdf, gutenberg."
   echo "entries:"
 } >> "$OUT_MANIFEST"
 
@@ -142,6 +142,23 @@ dir="$(clone_repo rust-lang book "$S_BOOK")"
 
 dir="$(clone_repo kubernetes website "$S_K8S")"
 [ -n "$dir" ] && { ( cd "$dir" && find content/en/docs/concepts content/en/docs/tasks content/en/docs/tutorials -name '*.md' -type f 2>/dev/null ) | sed 's|^\./||' > "$LIST"; run_source "$dir" kubernetes website "$S_K8S" CC-BY-4.0 md 150 "$LIST"; }
+
+# ───────────────────────── CSV tier ─────────────────────────
+S_TT=f55f1f30735a689efa3de1877b9d641d934eaf0f          # rfordatascience/tidytuesday — CC0-1.0
+S_GDP=f5b773571a8bf0dc9acebd3f7ffcf975598ab591         # datasets/gdp            — ODC-PDDL-1.0
+S_POP=425fc447a53a26c767a15a7de60c4cc2478a0595         # datasets/population     — ODC-PDDL-1.0
+S_CC=caa72d1e0e5af8876c170bb36a9e4d64a01bba88          # datasets/country-codes  — ODC-PDDL-1.0
+S_AIR=5fef52d0743c7d0adb9fee950cad311d0e547edf         # datasets/airport-codes  — ODC-PDDL-1.0
+S_LANG=4e4e7f422585150bffde9b28b077f1f270a3d401        # datasets/language-codes — ODC-PDDL-1.0
+
+dir="$(clone_repo rfordatascience tidytuesday "$S_TT")"
+[ -n "$dir" ] && { ( cd "$dir" && find data -name '*.csv' -type f -size -3M 2>/dev/null ) | sed 's|^\./||' > "$LIST"; run_source "$dir" rfordatascience tidytuesday "$S_TT" CC0-1.0 csv 40 "$LIST"; }
+
+for spec in "gdp:$S_GDP" "population:$S_POP" "country-codes:$S_CC" "airport-codes:$S_AIR" "language-codes:$S_LANG"; do
+  repo="${spec%%:*}"; sha="${spec##*:}"
+  dir="$(clone_repo datasets "$repo" "$sha")"
+  [ -n "$dir" ] && { ( cd "$dir" && find . -name '*.csv' -type f -size -3M 2>/dev/null ) | sed 's|^\./||' > "$LIST"; run_source "$dir" datasets "$repo" "$sha" ODC-PDDL-1.0 csv 0 "$LIST"; }
+done
 
 log "TOTAL entries authored: $TOTAL"
 echo "## TOTAL: $TOTAL entries" >> "$OUT_NOTICE"

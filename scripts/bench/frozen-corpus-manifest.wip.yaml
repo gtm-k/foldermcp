@@ -1,7 +1,7 @@
 version: 1
 mode: frozen
 corpus_id: bench-v1
-# WIP: authored tiers = code, md. Pending: csv, pdf, gutenberg.
+# WIP: authored tiers = code, md, csv. Pending: pdf, gutenberg.
 entries:
   - id: code-gin-auth-go
     url: https://raw.githubusercontent.com/gin-gonic/gin/34dac209ffb6ef85cc78c5d217bbb7ad001d68fd/auth.go
@@ -5708,3 +5708,388 @@ entries:
     stratum: md
     dest: md/website/content/en/docs/concepts/workloads/controllers/replicaset.md
     source: kubernetes/website@d41a4597a8bc
+  - id: csv-tidytuesday-data-2018-2018-04-23-week4_australian_salary-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-04-23/week4_australian_salary.csv
+    sha256: b044a2518398a822201a737d879951cc2042372df51801ab48e745aac3a2441e
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-04-23/week4_australian_salary.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-04-30-week5_acs2015_county_data-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-04-30/week5_acs2015_county_data.csv
+    sha256: daa3d82910b99fb5925d0a78e2909c0d88195a7a75bf849bdd4aaebd515acf72
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-04-30/week5_acs2015_county_data.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-05-14-week7_starwars-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-05-14/week7_starwars.csv
+    sha256: 9668b37ca4ca3dcf0fe85887079c5b05effab2a185e4530e60f9bb7cd68c6c94
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-05-14/week7_starwars.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-12-week11_fifa_audience-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-12/week11_fifa_audience.csv
+    sha256: cc5d3cf9be564c3edd50bbcbf8ae60abf878f9b045393feb95d0134a63a16c37
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-12/week11_fifa_audience.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-19-week12_google_trends-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-19/week12_google_trends.csv
+    sha256: b0a0b1f3ec86d472260d11fc6348230ee096a5d3ead278382e10bd68493caa8f
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-19/week12_google_trends.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-19-week12_mediacloud_hurricanes-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-19/week12_mediacloud_hurricanes.csv
+    sha256: 7dd50143786d2363b4cfaf40713c585646d5cd554cc863f1430ff1d70fad469f
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-19/week12_mediacloud_hurricanes.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-19-week12_mediacloud_states-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-19/week12_mediacloud_states.csv
+    sha256: a5ac662401160e96121644915037437d60728b39881c1c1b85c10204fe07653c
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-19/week12_mediacloud_states.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-19-week12_mediacloud_top_online_news-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-19/week12_mediacloud_top_online_news.csv
+    sha256: 742dbea3e4df5de48dfe4a0240ef3ef89458addb9a3b14e763f281c4c330145f
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-19/week12_mediacloud_top_online_news.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-19-week12_mediacloud_trump-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-19/week12_mediacloud_trump.csv
+    sha256: c1025a5267d037a94d6b64b911537cb960dd19d1bff6835d99142b93f1a42bc2
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-19/week12_mediacloud_trump.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-19-week12_tv_hurricanes-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-19/week12_tv_hurricanes.csv
+    sha256: 61d76edc5f20250dc35e0f29f2abfb536804a41aec74ca98f9e883ee66bb3c4d
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-19/week12_tv_hurricanes.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-06-26-week13_alcohol_global-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-06-26/week13_alcohol_global.csv
+    sha256: c65221a9cf9ce0ed50660e56934f482a59a9f73f84335f8a94e9e3dd95d23405
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-06-26/week13_alcohol_global.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-07-03-week14_global_life_expectancy-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-07-03/week14_global_life_expectancy.csv
+    sha256: a5325e6770cf58e0927915b81fba79dfcf08539ab20fd7ccdf9346ccdb863854
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-07-03/week14_global_life_expectancy.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-08-07-week19_airline_safety-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-08-07/week19_airline_safety.csv
+    sha256: a4e8cb2b60356968cc1138dd693b23133632ae7bb0810c61d6332b7ddd2b325a
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-08-07/week19_airline_safety.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-08-21-cal-fire-incidents-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-08-21/cal-fire-incidents.csv
+    sha256: b00b7ebd85e7211ffcd00fb524b775845bc816a7078430c55edee08b862bd6db
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-08-21/cal-fire-incidents.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-08-21-calfire_damage-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-08-21/calfire_damage.csv
+    sha256: bc695b0cafcea5579ee9d592c861afc252aced70427bceb28d2df32236aeb494
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-08-21/calfire_damage.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-04-fastfood_calories-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-04/fastfood_calories.csv
+    sha256: b5be2f92cd319d8bb515f0d07caf092d048e58f652e128154874ec1e4dc94c0f
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-04/fastfood_calories.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-11-cats_vs_dogs-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-11/cats_vs_dogs.csv
+    sha256: 31891b4206f739425cdecb7d6acb520e6c6f3ff1c4a301bd03af7f87a3592573
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-11/cats_vs_dogs.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-18-hypoxia-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-18/hypoxia.csv
+    sha256: b1ea13b54b3cac5520e54ca1f8dbc8a0c6c952a426751fdb5b611bee73e3943f
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-18/hypoxia.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-18-us-airports-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-18/us-airports.csv
+    sha256: 36fe208174a02c08641e5198536304e784beeb888ed9793171f2d7651c4984a2
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-18/us-airports.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-africa_species-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/africa_species.csv
+    sha256: 80db896a80d2ffbae9f8a32f6da11f14a95082348a372592929997e1a599e8d8
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/africa_species.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-raw-table1-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/raw/table1.csv
+    sha256: 9ae654b7f4ac11d9d57626b044e29f34632a682059ccae3f97d3745d2656a731
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/raw/table1.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-raw-table2-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/raw/table2.csv
+    sha256: 946eb378f57439915e8d4869220e3dd733f586aa6abc613017adbc23e6bfc88c
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/raw/table2.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-raw-table3-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/raw/table3.csv
+    sha256: 3a7623b3fb859b1475306727cdc7e3942bb3c2cf7b25daf683e3dd1ec002c0a0
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/raw/table3.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-raw-table4-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/raw/table4.csv
+    sha256: d1d498d67b8c8ec7ea15c10ed9fcfecb85429db550aa735a86282479f26c1b90
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/raw/table4.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-raw-table6-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/raw/table6.csv
+    sha256: 1d106cc30fb40f3d85a95eb230ae23839e950c1e97c55e413a13e013af1d4326
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/raw/table6.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-table_1-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/table_1.csv
+    sha256: 687e3d39e7f2b05f8a7be986d1e9cbf8654f8a709cad1d91f433e56d9cea7b2b
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/table_1.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-table_2-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/table_2.csv
+    sha256: 01a9583d2a82bcd8aa3b3f64e6cda2ae6a2324e9592906dee45f130d274771d1
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/table_2.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-table_3-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/table_3.csv
+    sha256: ec6c8ec928ed7efc305806b1e826bc1db8877f7673cce08e2df221f954fc5f96
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/table_3.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-table_4-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/table_4.csv
+    sha256: 1b193fe956baaabc664743881d300e7a470cc3ef4ab5fd94774ef2d63a223e2c
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/table_4.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-09-25-table_6-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-09-25/table_6.csv
+    sha256: 99f85935195d4cd0181ab77be4bc91b4b273d7f9fd7d0f69b0fc266bacf91ea3
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-09-25/table_6.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-10-02-us_births_2000-2014-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-10-02/us_births_2000-2014.csv
+    sha256: dfb9f4e0518bbb255cc24f1fdad496a1098ee24cd66509fe8ced7ac5e3d17fb2
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-10-02/us_births_2000-2014.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-10-09-voter_turnout-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-10-09/voter_turnout.csv
+    sha256: 011fd801d6fbc2d62543c0637eec15de77642b189d072a60aebe3148ab96ca34
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-10-09/voter_turnout.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-10-16-recent-grads-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-10-16/recent-grads.csv
+    sha256: 754566bc1b3717e03d0da656971dacee733e45e2f6a30a902f8260cc536b0f37
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-10-16/recent-grads.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-10-23-movie_profit-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-10-23/movie_profit.csv
+    sha256: c0e12dd39368dc097114a34dcabd8da1a5a7d8112cafdba9a48738659715ca03
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-10-23/movie_profit.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-10-30-r-downloads-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-10-30/r-downloads.csv
+    sha256: 6d5874b147caff290a9f484607d7983797769874d75af7e1c08a3f67b5b1ba12
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-10-30/r-downloads.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-11-13-malaria_deaths-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-11-13/malaria_deaths.csv
+    sha256: 06efcf198d6ddabb1bc995046304a5e078088ff6a3694068edada0684b3a4787
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-11-13/malaria_deaths.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-11-13-malaria_deaths_age-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-11-13/malaria_deaths_age.csv
+    sha256: 4945d931e2d58e0410c558c3057041fc41605398767e644b7f26a4ee43f890f3
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-11-13/malaria_deaths_age.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-11-13-malaria_inc-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-11-13/malaria_inc.csv
+    sha256: 99501710191d2958decf88f81161fc9293ac18b45fb1b37851b570d4e55c2009
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-11-13/malaria_inc.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-11-20-thanksgiving_meals-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-11-20/thanksgiving_meals.csv
+    sha256: 9784ebb25b5ed7fa2b697e30fb87b090e5aa7a37d728b9983d42ad24021b73ec
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-11-20/thanksgiving_meals.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-tidytuesday-data-2018-2018-11-27-baltimore_bridges-csv
+    url: https://raw.githubusercontent.com/rfordatascience/tidytuesday/f55f1f30735a689efa3de1877b9d641d934eaf0f/data/2018/2018-11-27/baltimore_bridges.csv
+    sha256: cc7e3c84285b647d08decb81537679260f2f42ffde19d8f1c84ac3ea682c794a
+    license: CC0-1.0
+    stratum: csv
+    dest: csv/tidytuesday/data/2018/2018-11-27/baltimore_bridges.csv
+    source: rfordatascience/tidytuesday@f55f1f30735a
+  - id: csv-gdp-data-gdp-csv
+    url: https://raw.githubusercontent.com/datasets/gdp/f5b773571a8bf0dc9acebd3f7ffcf975598ab591/data/gdp.csv
+    sha256: 8d84ef6bcaccf740c01c5ed7566aae8f7b149d0e2c20001e441efd3cb5b2fa86
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/gdp/data/gdp.csv
+    source: datasets/gdp@f5b773571a8b
+  - id: csv-gdp-data-top-economies-csv
+    url: https://raw.githubusercontent.com/datasets/gdp/f5b773571a8bf0dc9acebd3f7ffcf975598ab591/data/top-economies.csv
+    sha256: 1b8228f71436045b1b72cd9d499308903e4a625a15f0432babd4e0d0adf351dc
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/gdp/data/top-economies.csv
+    source: datasets/gdp@f5b773571a8b
+  - id: csv-population-data-population-csv
+    url: https://raw.githubusercontent.com/datasets/population/425fc447a53a26c767a15a7de60c4cc2478a0595/data/population.csv
+    sha256: 7d2dd6a17f5ed7916de1f89a9c116791e64d207f2e2f6ce47c57e1ab46f0088a
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/population/data/population.csv
+    source: datasets/population@425fc447a53a
+  - id: csv-country-codes-data-country-codes-csv
+    url: https://raw.githubusercontent.com/datasets/country-codes/caa72d1e0e5af8876c170bb36a9e4d64a01bba88/data/country-codes.csv
+    sha256: 67b009b529330b0a6043551189f43faa785c9c3cc0011ad2bdb4eac876356c43
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/country-codes/data/country-codes.csv
+    source: datasets/country-codes@caa72d1e0e5a
+  - id: csv-country-codes-tmp-UNSD-ar-csv
+    url: https://raw.githubusercontent.com/datasets/country-codes/caa72d1e0e5af8876c170bb36a9e4d64a01bba88/tmp/UNSD-ar.csv
+    sha256: e7ed621c697193e46786ae9e707c2be008b24f3ecfd2aabd76b0b9785c30dae1
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/country-codes/tmp/UNSD-ar.csv
+    source: datasets/country-codes@caa72d1e0e5a
+  - id: csv-country-codes-tmp-UNSD-cn-csv
+    url: https://raw.githubusercontent.com/datasets/country-codes/caa72d1e0e5af8876c170bb36a9e4d64a01bba88/tmp/UNSD-cn.csv
+    sha256: bd9e8cb1e14b0c640922eac45f16a539390a09e23cf499e389868fba74c24da7
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/country-codes/tmp/UNSD-cn.csv
+    source: datasets/country-codes@caa72d1e0e5a
+  - id: csv-country-codes-tmp-UNSD-en-csv
+    url: https://raw.githubusercontent.com/datasets/country-codes/caa72d1e0e5af8876c170bb36a9e4d64a01bba88/tmp/UNSD-en.csv
+    sha256: 776e41d57d6e57be6aa179c1e89fa76b94ca4fe91c2beec02d8ecc88207051ea
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/country-codes/tmp/UNSD-en.csv
+    source: datasets/country-codes@caa72d1e0e5a
+  - id: csv-country-codes-tmp-UNSD-es-csv
+    url: https://raw.githubusercontent.com/datasets/country-codes/caa72d1e0e5af8876c170bb36a9e4d64a01bba88/tmp/UNSD-es.csv
+    sha256: 12111270f6449528f6850d4a93f815a7dcb7d1e051fa2e2ce9440551c56ebc03
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/country-codes/tmp/UNSD-es.csv
+    source: datasets/country-codes@caa72d1e0e5a
+  - id: csv-country-codes-tmp-UNSD-fr-csv
+    url: https://raw.githubusercontent.com/datasets/country-codes/caa72d1e0e5af8876c170bb36a9e4d64a01bba88/tmp/UNSD-fr.csv
+    sha256: 8b62457e0df785d24ae4ec886dd36cdaabbc2911f951b6b73242d8857065abcf
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/country-codes/tmp/UNSD-fr.csv
+    source: datasets/country-codes@caa72d1e0e5a
+  - id: csv-country-codes-tmp-UNSD-ru-csv
+    url: https://raw.githubusercontent.com/datasets/country-codes/caa72d1e0e5af8876c170bb36a9e4d64a01bba88/tmp/UNSD-ru.csv
+    sha256: 15cf011eb247e6c64912b1fb062b69361f9cb64e52268403df3b9e3b1960b085
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/country-codes/tmp/UNSD-ru.csv
+    source: datasets/country-codes@caa72d1e0e5a
+  - id: csv-airport-codes-data-type-counts-csv
+    url: https://raw.githubusercontent.com/datasets/airport-codes/5fef52d0743c7d0adb9fee950cad311d0e547edf/data/type-counts.csv
+    sha256: 4377de0dcf11179d2152a90755dfbc788366271531ad2ff68e307b87876dee72
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/airport-codes/data/type-counts.csv
+    source: datasets/airport-codes@5fef52d0743c
+  - id: csv-language-codes-data-ietf-language-tags-csv
+    url: https://raw.githubusercontent.com/datasets/language-codes/4e4e7f422585150bffde9b28b077f1f270a3d401/data/ietf-language-tags.csv
+    sha256: daa31abb0c906f40eaab3f780d657c40bdf1f9dcfe57255e499f60d3c4692b32
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/language-codes/data/ietf-language-tags.csv
+    source: datasets/language-codes@4e4e7f422585
+  - id: csv-language-codes-data-language-codes-3b2-csv
+    url: https://raw.githubusercontent.com/datasets/language-codes/4e4e7f422585150bffde9b28b077f1f270a3d401/data/language-codes-3b2.csv
+    sha256: 91f3f427c5a6aefade22ab4c64bbe2c7a009904307bed3e9183ce012047a2850
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/language-codes/data/language-codes-3b2.csv
+    source: datasets/language-codes@4e4e7f422585
+  - id: csv-language-codes-data-language-codes-full-csv
+    url: https://raw.githubusercontent.com/datasets/language-codes/4e4e7f422585150bffde9b28b077f1f270a3d401/data/language-codes-full.csv
+    sha256: 72735a905b71b9779344429a2a50ce973990e09186cc2a43b927769a1ab635e9
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/language-codes/data/language-codes-full.csv
+    source: datasets/language-codes@4e4e7f422585
+  - id: csv-language-codes-data-language-codes-csv
+    url: https://raw.githubusercontent.com/datasets/language-codes/4e4e7f422585150bffde9b28b077f1f270a3d401/data/language-codes.csv
+    sha256: 34e9dde2efbb37abd8c24d47a8693063579f706836fbe694557ecdbf1bfc53f2
+    license: ODC-PDDL-1.0
+    stratum: csv
+    dest: csv/language-codes/data/language-codes.csv
+    source: datasets/language-codes@4e4e7f422585
