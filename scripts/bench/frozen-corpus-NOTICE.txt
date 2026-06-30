@@ -18,3 +18,4 @@ its pinned upstream URL. Attribution for CC-BY sources is recorded below.
   datasets/airport-codes ODC-PDDL-1.0       csv (1 files) https://github.com/datasets/airport-codes/tree/5fef52d0743c7d0adb9fee950cad311d0e547edf
   datasets/language-codes ODC-PDDL-1.0       csv (4 files) https://github.com/datasets/language-codes/tree/4e4e7f422585150bffde9b28b077f1f270a3d401
 ## TOTAL: 870 entries
+  federalregister.gov    public-domain      pdf (105 files) U.S. Government works

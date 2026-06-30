@@ -1,7 +1,11 @@
 version: 1
 mode: frozen
 corpus_id: bench-v1
-# WIP: authored tiers = code, md, csv. Pending: pdf, gutenberg.
+# Authored: code, md, csv (git tiers — author-frozen-corpus.sh) + pdf (author-pdf-tier.sh).
+# All 4 strata; floors cleared (code 554, md 261, csv 55, pdf 105 = 975). Gutenberg
+# omitted (prose floor already met by code/md). Regenerate order: run
+# author-frozen-corpus.sh THEN author-pdf-tier.sh (the latter appends the pdf tier).
+# NOT yet frozen — `git tag bench-v1-frozen` applies after queries + thresholds lock (D11).
 entries:
   - id: code-gin-auth-go
     url: https://raw.githubusercontent.com/gin-gonic/gin/34dac209ffb6ef85cc78c5d217bbb7ad001d68fd/auth.go
@@ -6093,3 +6097,738 @@ entries:
     stratum: csv
     dest: csv/language-codes/data/language-codes.csv
     source: datasets/language-codes@4e4e7f422585
+  - id: pdf-fr-2023-26792
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-26792.pdf
+    sha256: 5cc928b149b53c7eb2232b4c047bb3a51c48d1fa90357ff0e772978697b3586c
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-26792.pdf
+    source: federalregister.gov FR-doc 2023-26792
+  - id: pdf-fr-2023-27783
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-27783.pdf
+    sha256: 5e914246d64bafd5d30ba780c98be48aac89afb8b615f6f2e3cbe9699ad9a7a4
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-27783.pdf
+    source: federalregister.gov FR-doc 2023-27783
+  - id: pdf-fr-2023-27901
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-27901.pdf
+    sha256: dd7c04069070c905520164e7bcc371c57b80dc7f3950f76bc7359ba0c0cf7355
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-27901.pdf
+    source: federalregister.gov FR-doc 2023-27901
+  - id: pdf-fr-2023-27905
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-27905.pdf
+    sha256: 9c5a908794cf73f40d0e0088546d5a94bffa3a549e122a97d558cd29f4a5a48e
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-27905.pdf
+    source: federalregister.gov FR-doc 2023-27905
+  - id: pdf-fr-2023-27906
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-27906.pdf
+    sha256: 6d7f0b18863e601cc8fe27540fbd7eed0c6df98f7e0bd7e88c6c828d7ffea14f
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-27906.pdf
+    source: federalregister.gov FR-doc 2023-27906
+  - id: pdf-fr-2023-27908
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-27908.pdf
+    sha256: d177a917f8f22521f5ddfb70e19a4421a3cdeaadf75e38935211226dc23885a0
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-27908.pdf
+    source: federalregister.gov FR-doc 2023-27908
+  - id: pdf-fr-2023-28102
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28102.pdf
+    sha256: 686caa448debaac7610eabfb42956c713ce38f8d73b0752cb790ae9d16e2a691
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28102.pdf
+    source: federalregister.gov FR-doc 2023-28102
+  - id: pdf-fr-2023-28384
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28384.pdf
+    sha256: b04a12df0888cca29f013a66289b3686dd7183f41e8fed87bb937a1f4e0a722c
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28384.pdf
+    source: federalregister.gov FR-doc 2023-28384
+  - id: pdf-fr-2023-28469
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28469.pdf
+    sha256: 4cadd9ef5d27d3c5a1e05e81bbf6bb2dfa9444b061c1b723a667edc2ccd9da31
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28469.pdf
+    source: federalregister.gov FR-doc 2023-28469
+  - id: pdf-fr-2023-28528
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28528.pdf
+    sha256: 61aa2182817fc215f835b287580ae7bc7d9919625eca27c034298877fbbeb6ef
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28528.pdf
+    source: federalregister.gov FR-doc 2023-28528
+  - id: pdf-fr-2023-28536
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28536.pdf
+    sha256: 264faca08c61a4bfb61fb5a44a226edac1c278ede2176b9d5a0bac4c0b139baf
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28536.pdf
+    source: federalregister.gov FR-doc 2023-28536
+  - id: pdf-fr-2023-28552
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28552.pdf
+    sha256: d7006a10f5e1d23c175544843eeb693e02ace016748adc383fbb36f96261a71f
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28552.pdf
+    source: federalregister.gov FR-doc 2023-28552
+  - id: pdf-fr-2023-28554
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28554.pdf
+    sha256: 25635a7e1f644a7da988d020e078b7805839a9a4b4f8d8732d896021528097f7
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28554.pdf
+    source: federalregister.gov FR-doc 2023-28554
+  - id: pdf-fr-2023-28643
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28643.pdf
+    sha256: 0464f209b0029c96032f600853a6e1a6ecce1c0fb7309b8798418e0411f7ab97
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28643.pdf
+    source: federalregister.gov FR-doc 2023-28643
+  - id: pdf-fr-2023-28669
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28669.pdf
+    sha256: d127ba7af3cb6a758814d0282bf30f632848392f6d59be00426f3d8db3b64dcd
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28669.pdf
+    source: federalregister.gov FR-doc 2023-28669
+  - id: pdf-fr-2023-28718
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28718.pdf
+    sha256: 67cf9d983e1218adb92e9bbc0c62c88b1e7db0eb000c541927f4b5a2f3eba4f2
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28718.pdf
+    source: federalregister.gov FR-doc 2023-28718
+  - id: pdf-fr-2023-28792
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28792.pdf
+    sha256: 0acc2706ca85372c968bb6784da91acea655bbc70f5a42789b23c39931c59601
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28792.pdf
+    source: federalregister.gov FR-doc 2023-28792
+  - id: pdf-fr-2023-28793
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28793.pdf
+    sha256: 066685fcb180d917f9bc3451d4839fc36bc8f898e58e9acd6b555314eb186a22
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28793.pdf
+    source: federalregister.gov FR-doc 2023-28793
+  - id: pdf-fr-2023-28794
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28794.pdf
+    sha256: 0791a9ef5acb990c48739b7fab647ff14fc3b95d8acc22ced3419e2cf6dc9859
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28794.pdf
+    source: federalregister.gov FR-doc 2023-28794
+  - id: pdf-fr-2023-28796
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28796.pdf
+    sha256: 237fdba2305ecfb55be278bd8bee3407a1e10db0fd1138149ca139214fe91325
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28796.pdf
+    source: federalregister.gov FR-doc 2023-28796
+  - id: pdf-fr-2023-28797
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28797.pdf
+    sha256: a8c413b4488d3794ebc3214c1dce2760d112aeba9c65f3c351938b9da0ca7753
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28797.pdf
+    source: federalregister.gov FR-doc 2023-28797
+  - id: pdf-fr-2023-28798
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28798.pdf
+    sha256: 147fbbb54a1e1a6e862976ae80ec2b4f9c5efa16894d8f81ceef64e56602d243
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28798.pdf
+    source: federalregister.gov FR-doc 2023-28798
+  - id: pdf-fr-2023-28799
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28799.pdf
+    sha256: 6048b758530bf10caab08576aa15e295500c9f1b1ef4ec418dffeaf178eb9076
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28799.pdf
+    source: federalregister.gov FR-doc 2023-28799
+  - id: pdf-fr-2023-28800
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28800.pdf
+    sha256: b7e23ceff132f02a32e2c225accb531db6400f625b4f6b8d9711363faa9e9788
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28800.pdf
+    source: federalregister.gov FR-doc 2023-28800
+  - id: pdf-fr-2023-28801
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28801.pdf
+    sha256: 1c3554fbe59c14e62eac55e0aa9beb5dc209baf1c93753137a80f54b4cf1032b
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28801.pdf
+    source: federalregister.gov FR-doc 2023-28801
+  - id: pdf-fr-2023-28802
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28802.pdf
+    sha256: 711b49cb298cce78e768795b8ee87100cc7d237dd52ff982959498fc527f1808
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28802.pdf
+    source: federalregister.gov FR-doc 2023-28802
+  - id: pdf-fr-2023-28803
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28803.pdf
+    sha256: 839a97004c38ff2bd3961bdefc2e0729652b808ff830786c869a42395ca8336d
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28803.pdf
+    source: federalregister.gov FR-doc 2023-28803
+  - id: pdf-fr-2023-28804
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28804.pdf
+    sha256: ec71890bfe47257a206315a76eb1403f62bc62b5ae2b17f31109d30cd49fb9de
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28804.pdf
+    source: federalregister.gov FR-doc 2023-28804
+  - id: pdf-fr-2023-28806
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28806.pdf
+    sha256: c65120487b4d38d3ac00885d077d8c12d13726146efdeda372e534c36a2932ec
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28806.pdf
+    source: federalregister.gov FR-doc 2023-28806
+  - id: pdf-fr-2023-28807
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28807.pdf
+    sha256: 5fe9bdf0459cb46b95309b6a1ae6a269d7f9d9b4cf39e91d94753888e297ab3c
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28807.pdf
+    source: federalregister.gov FR-doc 2023-28807
+  - id: pdf-fr-2023-28808
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28808.pdf
+    sha256: f34c4a1d37091ce2e6bdd86706651194c06a62357366e89ba9d390570d9b3b63
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28808.pdf
+    source: federalregister.gov FR-doc 2023-28808
+  - id: pdf-fr-2023-28809
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28809.pdf
+    sha256: b7a6cff1aaa085931b32959921ca776b5b5432b5d694436c8d504fb0d08a82c3
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28809.pdf
+    source: federalregister.gov FR-doc 2023-28809
+  - id: pdf-fr-2023-28810
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28810.pdf
+    sha256: 06c5f142fbc925aa36c3af4ce80ac5d1e19e011822864ce44550860762a96c14
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28810.pdf
+    source: federalregister.gov FR-doc 2023-28810
+  - id: pdf-fr-2023-28811
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28811.pdf
+    sha256: 87681681fc2a4f5f2c4de12f42abde7257ea9258b684fec538e6457e18221e07
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28811.pdf
+    source: federalregister.gov FR-doc 2023-28811
+  - id: pdf-fr-2023-28812
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28812.pdf
+    sha256: 4a696b3ccf264093326663176e45b93e336ec024fd88447ab56d39e5e9b9e5f8
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28812.pdf
+    source: federalregister.gov FR-doc 2023-28812
+  - id: pdf-fr-2023-28813
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28813.pdf
+    sha256: 476a6c421dcc8b2620a02ccced40f7d56efd8f953f5d837d3b205a9b7fae98ba
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28813.pdf
+    source: federalregister.gov FR-doc 2023-28813
+  - id: pdf-fr-2023-28814
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28814.pdf
+    sha256: 58ed04a2ae983eed8b433bccae6673e9d758d859605995e40737e892df1bd1a6
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28814.pdf
+    source: federalregister.gov FR-doc 2023-28814
+  - id: pdf-fr-2023-28815
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28815.pdf
+    sha256: 698498ddc9c435946304fd90e5f721803861c1cdcc57a577ead7bd273ca033ab
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28815.pdf
+    source: federalregister.gov FR-doc 2023-28815
+  - id: pdf-fr-2023-28816
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28816.pdf
+    sha256: 863b0acaad88707595809a2c3dae50860f2d6ba59d63b7ba4ca3247c5c2548f4
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28816.pdf
+    source: federalregister.gov FR-doc 2023-28816
+  - id: pdf-fr-2023-28817
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28817.pdf
+    sha256: 6b251ed88482ee8753824a877001729c2d28826dbf689d87159f5f880cce2ac2
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28817.pdf
+    source: federalregister.gov FR-doc 2023-28817
+  - id: pdf-fr-2023-28818
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28818.pdf
+    sha256: 70cca9d5f1151b1260523843a1b1d881994c21a2bf9f62210cf9c6faa52ce177
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28818.pdf
+    source: federalregister.gov FR-doc 2023-28818
+  - id: pdf-fr-2023-28819
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28819.pdf
+    sha256: dab7c67ddb9e1a725b7d09f6d25e394eeb75257174eb342a650ea1aef03d59fd
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28819.pdf
+    source: federalregister.gov FR-doc 2023-28819
+  - id: pdf-fr-2023-28821
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28821.pdf
+    sha256: eea2b5d6e2930d348d7b9f0bc204332b383e9161a03bf30facbda394ee29ed9d
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28821.pdf
+    source: federalregister.gov FR-doc 2023-28821
+  - id: pdf-fr-2023-28822
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28822.pdf
+    sha256: fc8cda77c183141ccde8f78275ebaeca9107d19e2aef74c9d0d18a9ca5fb1a45
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28822.pdf
+    source: federalregister.gov FR-doc 2023-28822
+  - id: pdf-fr-2023-28823
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28823.pdf
+    sha256: 5191a7fe4e75e0960b0aa0795efab1ae5ecc0c7b5213863a0fe6769af24127f4
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28823.pdf
+    source: federalregister.gov FR-doc 2023-28823
+  - id: pdf-fr-2023-28824
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28824.pdf
+    sha256: 6f65e0bdfcb868ca2c5dd4c04eeac60dbce93bac08d17edf3dcd26958a9ecaf8
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28824.pdf
+    source: federalregister.gov FR-doc 2023-28824
+  - id: pdf-fr-2023-28826
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28826.pdf
+    sha256: 59c5ac48b0dce5b34980e058bc30916b185098073be75079ca3f68bcc578f566
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28826.pdf
+    source: federalregister.gov FR-doc 2023-28826
+  - id: pdf-fr-2023-28827
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28827.pdf
+    sha256: b282a2cf190fefba819941c0bea9aeb67e7aa5b6668eaf3cb93c068fe8edba1a
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28827.pdf
+    source: federalregister.gov FR-doc 2023-28827
+  - id: pdf-fr-2023-28829
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28829.pdf
+    sha256: 2d4237454dee4ca687efeb0b4d49e152bc1a471e9c25327681fe0f3e3aa73a87
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28829.pdf
+    source: federalregister.gov FR-doc 2023-28829
+  - id: pdf-fr-2023-28831
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28831.pdf
+    sha256: 3dea330730c6c2227286c12472e1b5dd1bb8d0c62e7976776d7484cb9096fe76
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28831.pdf
+    source: federalregister.gov FR-doc 2023-28831
+  - id: pdf-fr-2023-28836
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28836.pdf
+    sha256: f95b710ea43f5aa303247de526d838cad1ece488044407f954a75ce1c9e7061c
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28836.pdf
+    source: federalregister.gov FR-doc 2023-28836
+  - id: pdf-fr-2023-28837
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28837.pdf
+    sha256: d3524916a0d15a46def0eae66f70a7c5fbfd2883fd50edd1e8c6dcdecc0f30e5
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28837.pdf
+    source: federalregister.gov FR-doc 2023-28837
+  - id: pdf-fr-2023-28840
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28840.pdf
+    sha256: 922d6b54c61898f6dcda1fdd086d76524658f153cc5e99adb930e92030b7be0b
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28840.pdf
+    source: federalregister.gov FR-doc 2023-28840
+  - id: pdf-fr-2023-28841
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28841.pdf
+    sha256: b81d9ea9c0b5f001ae8892e01897ec2d211ae44de71c08cd9dfad03a7d0d5f18
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28841.pdf
+    source: federalregister.gov FR-doc 2023-28841
+  - id: pdf-fr-2023-28842
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28842.pdf
+    sha256: 83f9a9404b0581c65e83afbc45fb1deb1158e2515f29b8ba87315486ca0c2a5c
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28842.pdf
+    source: federalregister.gov FR-doc 2023-28842
+  - id: pdf-fr-2023-28843
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28843.pdf
+    sha256: 5db909beb387a4611d9a4dc193b0b7c029df305f05101bc0f5683ab282aa03dc
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28843.pdf
+    source: federalregister.gov FR-doc 2023-28843
+  - id: pdf-fr-2023-28844
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28844.pdf
+    sha256: e511ab470b1f6551a303e4e368bf1532d1c7d6f23c69f455ada99e20a042e7d3
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28844.pdf
+    source: federalregister.gov FR-doc 2023-28844
+  - id: pdf-fr-2023-28845
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28845.pdf
+    sha256: 339704ef527a53a77c9fc9355427052609220c68684026b5d7c8625fb3f36767
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28845.pdf
+    source: federalregister.gov FR-doc 2023-28845
+  - id: pdf-fr-2023-28856
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28856.pdf
+    sha256: 261f238a34356c6ddb3a0463d0ca7bac4e1721fbf48ab92f22e92dbf9a3305a9
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28856.pdf
+    source: federalregister.gov FR-doc 2023-28856
+  - id: pdf-fr-2023-28875
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28875.pdf
+    sha256: 97fe8432e7f27fda26247f3b36c401481d217c2f6c287a6944ad07ee4948a386
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28875.pdf
+    source: federalregister.gov FR-doc 2023-28875
+  - id: pdf-fr-2023-28892
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28892.pdf
+    sha256: 848633c020b93a5cb10a872f90c2b50a46c17a28f0f534e84d698877bb03bea1
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28892.pdf
+    source: federalregister.gov FR-doc 2023-28892
+  - id: pdf-fr-2023-28935
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28935.pdf
+    sha256: 7ede536e18fd83618f190de3778199e8e9046a689e1069a15b492fa17aab8e4f
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28935.pdf
+    source: federalregister.gov FR-doc 2023-28935
+  - id: pdf-fr-2023-28947
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/2023-28947.pdf
+    sha256: 2d9dd391ae5a7f530bb437c68cdb60f232aa1ce6d84116ddf0df9e99f8c39c0b
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28947.pdf
+    source: federalregister.gov FR-doc 2023-28947
+  - id: pdf-fr-C1-2023-27742
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-02/pdf/C1-2023-27742.pdf
+    sha256: 7f4e2d8ba4cbbcd88c38daa9d38899754ba242179eadc54df794c4e4f7e8b84b
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/C1-2023-27742.pdf
+    source: federalregister.gov FR-doc C1-2023-27742
+  - id: pdf-fr-2023-27019
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-27019.pdf
+    sha256: 8b191d30c9adc5c880ed1bcc12d2e1fcd516d2bcb51176547993cce1be8b02c5
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-27019.pdf
+    source: federalregister.gov FR-doc 2023-27019
+  - id: pdf-fr-2023-28421
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28421.pdf
+    sha256: 8b4e68d824f972011df8e0ea961f2e08e3f2d62baa14f86a29e763d7bf665f12
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28421.pdf
+    source: federalregister.gov FR-doc 2023-28421
+  - id: pdf-fr-2023-28702
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28702.pdf
+    sha256: 8641abecd673abcc1ac0d84e65886e348e4694974e2852ea1a300606183fc71a
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28702.pdf
+    source: federalregister.gov FR-doc 2023-28702
+  - id: pdf-fr-2023-28724
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28724.pdf
+    sha256: 6081aa4969e5d061abc762345618494accba0d5b40b7a98283b467daa88e613e
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28724.pdf
+    source: federalregister.gov FR-doc 2023-28724
+  - id: pdf-fr-2023-28765
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28765.pdf
+    sha256: bcf6735c6607ba2f33707cb0ce998f7d8b6a40669ce98ca663d61876d36376cb
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28765.pdf
+    source: federalregister.gov FR-doc 2023-28765
+  - id: pdf-fr-2023-28767
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28767.pdf
+    sha256: a8a02301795e827f20dfdf0905dccf49d81663ca00e853f6c3726dd6c8e456fe
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28767.pdf
+    source: federalregister.gov FR-doc 2023-28767
+  - id: pdf-fr-2023-28846
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28846.pdf
+    sha256: 7dc590a0b9e04f806961536a5f18da31256f8267c411854228f17c49c2952161
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28846.pdf
+    source: federalregister.gov FR-doc 2023-28846
+  - id: pdf-fr-2023-28847
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28847.pdf
+    sha256: d47122673361a3491c431c479fc19163c41b5832c7206550c870fe4afd448210
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28847.pdf
+    source: federalregister.gov FR-doc 2023-28847
+  - id: pdf-fr-2023-28848
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28848.pdf
+    sha256: 9bbec12dce49b028626f06356936730f537b4da2556aa4ad33682d52d8938d9a
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28848.pdf
+    source: federalregister.gov FR-doc 2023-28848
+  - id: pdf-fr-2023-28849
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28849.pdf
+    sha256: fd6713107f3f8aa3c4196af92dc7022d69b69ba0229f2c31e7b46f6300573f80
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28849.pdf
+    source: federalregister.gov FR-doc 2023-28849
+  - id: pdf-fr-2023-28850
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28850.pdf
+    sha256: 5012d483b35c78f3099e5d5993bb3699c78c83d397b253aa343cc02c4c8d3187
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28850.pdf
+    source: federalregister.gov FR-doc 2023-28850
+  - id: pdf-fr-2023-28851
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28851.pdf
+    sha256: 2befbc983694cfd0af445c0c72385908283519220cde84cc072555e4a44756b4
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28851.pdf
+    source: federalregister.gov FR-doc 2023-28851
+  - id: pdf-fr-2023-28852
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28852.pdf
+    sha256: c12e1ab199fd9f92aea194fe601930e05d137d214206123d535ac3d3adc919bc
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28852.pdf
+    source: federalregister.gov FR-doc 2023-28852
+  - id: pdf-fr-2023-28853
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28853.pdf
+    sha256: e7e62f3df1555e19d092879f69147b2701b0361eceda58de85f324a9ca1ecb8b
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28853.pdf
+    source: federalregister.gov FR-doc 2023-28853
+  - id: pdf-fr-2023-28854
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28854.pdf
+    sha256: 9cd7f3de2d07c98557b74a66279d3653feb33aa77184cd64dcd82690ffba018b
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28854.pdf
+    source: federalregister.gov FR-doc 2023-28854
+  - id: pdf-fr-2023-28855
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28855.pdf
+    sha256: ed97b0363324fcd7b18b62fa9d89c9a56ba6e73a8059df8be3169b0dc85c9ec4
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28855.pdf
+    source: federalregister.gov FR-doc 2023-28855
+  - id: pdf-fr-2023-28858
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28858.pdf
+    sha256: 058a88e280e08e8841faafb278894c5b9a70af83966ca2cd7c8d3eb969abba25
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28858.pdf
+    source: federalregister.gov FR-doc 2023-28858
+  - id: pdf-fr-2023-28859
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28859.pdf
+    sha256: 9db04a26a4ac07173c2e73544620d856033c57d9d4ce07fd01cf9e39b2b0cf30
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28859.pdf
+    source: federalregister.gov FR-doc 2023-28859
+  - id: pdf-fr-2023-28860
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28860.pdf
+    sha256: 74f5b741e74deb99de531305710ba4735ddd3051661d0d7be0a35f4a8c05d146
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28860.pdf
+    source: federalregister.gov FR-doc 2023-28860
+  - id: pdf-fr-2023-28861
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28861.pdf
+    sha256: 1ff0160bea52a6fbc32de7789b5bf0c92d468cc5ba9b98432bae9d85a622bf19
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28861.pdf
+    source: federalregister.gov FR-doc 2023-28861
+  - id: pdf-fr-2023-28862
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28862.pdf
+    sha256: bcefd5608a3c3420f008fa4f65dfed7b179fde12460149cc1fd6de4a619cdc67
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28862.pdf
+    source: federalregister.gov FR-doc 2023-28862
+  - id: pdf-fr-2023-28863
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28863.pdf
+    sha256: 0621cc3dead87df2737b26fe5962b086afd2ce246847ff77bbb0ea47903875c5
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28863.pdf
+    source: federalregister.gov FR-doc 2023-28863
+  - id: pdf-fr-2023-28864
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28864.pdf
+    sha256: b0c0cf17924756671a7132a43439a429b0a5a9bb640536fa1e0341130dec841a
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28864.pdf
+    source: federalregister.gov FR-doc 2023-28864
+  - id: pdf-fr-2023-28865
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28865.pdf
+    sha256: 063a1d65c318cc59905993bf0941a52d2454022bcd963d5de9121714877b4f0f
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28865.pdf
+    source: federalregister.gov FR-doc 2023-28865
+  - id: pdf-fr-2023-28867
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28867.pdf
+    sha256: 1fd98a0aa911a61d7e40ddfeaa324c497f4c0f944abee3272f1350b0b25000d9
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28867.pdf
+    source: federalregister.gov FR-doc 2023-28867
+  - id: pdf-fr-2023-28868
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28868.pdf
+    sha256: d4a689b0bc48d664d9fd69477ca08ea718927923ef971de9312e2b1a2efb7ef2
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28868.pdf
+    source: federalregister.gov FR-doc 2023-28868
+  - id: pdf-fr-2023-28869
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28869.pdf
+    sha256: b6313a21db03b28e38e200b5a60ca5edd693b81e3ce3c07f07357583bf2a3aa9
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28869.pdf
+    source: federalregister.gov FR-doc 2023-28869
+  - id: pdf-fr-2023-28870
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28870.pdf
+    sha256: b04796a4689390505e4f3f3ae5a20a40860d4a96291e9b2a4a913d9c7e510c9a
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28870.pdf
+    source: federalregister.gov FR-doc 2023-28870
+  - id: pdf-fr-2023-28871
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28871.pdf
+    sha256: 2ed7fdc7436fc57c0b363373110f4075fafea8a5dd6f9393160fba9cbfc9dda3
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28871.pdf
+    source: federalregister.gov FR-doc 2023-28871
+  - id: pdf-fr-2023-28872
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28872.pdf
+    sha256: a7d1575d7490e59a4a5cf1d89826a35b4ec6c87f82a241e6e122115dbca21bad
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28872.pdf
+    source: federalregister.gov FR-doc 2023-28872
+  - id: pdf-fr-2023-28873
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28873.pdf
+    sha256: d4e1da936808b395bfa3d2e4ea221f51df22de9615b020181ca6f08d8ce79e05
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28873.pdf
+    source: federalregister.gov FR-doc 2023-28873
+  - id: pdf-fr-2023-28874
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28874.pdf
+    sha256: 7c4e207ba01f60b558f00c2003b303a70447ab6c5b431cb17682c2914db587f1
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28874.pdf
+    source: federalregister.gov FR-doc 2023-28874
+  - id: pdf-fr-2023-28876
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28876.pdf
+    sha256: dd144b7613c29c74af73244a0d314f7111e61c15530612001b5028d5ca74a2ee
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28876.pdf
+    source: federalregister.gov FR-doc 2023-28876
+  - id: pdf-fr-2023-28877
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28877.pdf
+    sha256: 06df76b454fb2893e20918f92ab5152e190297d311536d319a438be925643b62
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28877.pdf
+    source: federalregister.gov FR-doc 2023-28877
+  - id: pdf-fr-2023-28878
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28878.pdf
+    sha256: d6ac7e7f09365ab9eab78bb5827171a84a88c14790b5bebe4248164f9a27e5a6
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28878.pdf
+    source: federalregister.gov FR-doc 2023-28878
+  - id: pdf-fr-2023-28879
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28879.pdf
+    sha256: ae98aabccfd3bdaa5b2295e3265f6eb1b121aeb2c5fbb6a8785d445b0bd01d7a
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28879.pdf
+    source: federalregister.gov FR-doc 2023-28879
+  - id: pdf-fr-2023-28882
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28882.pdf
+    sha256: 4894916685537c1d1d2900d4e9c9154b6647c7e818f1916a38f9ef3f1f3bd0a4
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28882.pdf
+    source: federalregister.gov FR-doc 2023-28882
+  - id: pdf-fr-2023-28883
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28883.pdf
+    sha256: 31e16baf37229fff585cf8653418f428d2de62953a8620b7ba8cb00ea2e809c1
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28883.pdf
+    source: federalregister.gov FR-doc 2023-28883
+  - id: pdf-fr-2023-28884
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28884.pdf
+    sha256: 4b55dc6f71ac298e8cb4cf3eac0b9dbbdfb9c387cb3a035058b41e48523b8777
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28884.pdf
+    source: federalregister.gov FR-doc 2023-28884
+  - id: pdf-fr-2023-28885
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28885.pdf
+    sha256: 08419f6443309aae158670d886446ee5252dae595664ffff9b7768cbd3e83169
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28885.pdf
+    source: federalregister.gov FR-doc 2023-28885
+  - id: pdf-fr-2023-28886
+    url: https://www.govinfo.gov/content/pkg/FR-2024-01-03/pdf/2023-28886.pdf
+    sha256: 5ecbc975defb0a8d87886ae5a8c7c071845bd07cd9d70a79a11f3e5400ad41f2
+    license: public-domain
+    stratum: pdf
+    dest: pdf/federal-register/2023-28886.pdf
+    source: federalregister.gov FR-doc 2023-28886
