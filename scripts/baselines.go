@@ -475,12 +475,17 @@ func runPdftotext(ctx context.Context, bin, pdfPath string) (string, error) {
 	return string(out), err
 }
 
-// findPDFs returns the .pdf files under root (bounded discovery walk).
-func findPDFs(root string) ([]string, error) {
-	var pdfs []string
-	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries, don't abort
+// findPDFs returns the .pdf files under root (bounded discovery walk). Per-entry
+// walk errors (an unreadable directory can hide nested PDFs) are logged VISIBLY
+// with the failing path and counted, then skipped — a silent skip would let a
+// partial PDF stratum masquerade as complete. The walkErrs count is returned so
+// callers can emit a summary (Codex re-review Finding 4).
+func findPDFs(root string) (pdfs []string, walkErrs int, err error) {
+	err = filepath.WalkDir(root, func(p string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			walkErrs++
+			fmt.Fprintf(os.Stderr, "  [agentic-grep] PDF discovery cannot read %q: %v — nested PDFs there are skipped\n", p, werr)
+			return nil // skip the unreadable entry, don't abort the whole walk
 		}
 		if !d.IsDir() && strings.EqualFold(filepath.Ext(p), ".pdf") {
 			pdfs = append(pdfs, p)
@@ -488,7 +493,7 @@ func findPDFs(root string) ([]string, error) {
 		return nil
 	})
 	sort.Strings(pdfs) // deterministic order
-	return pdfs, err
+	return pdfs, walkErrs, err
 }
 
 // orderPDFsByQuery reorders discovered PDFs so that those whose PATH matches a
@@ -572,11 +577,14 @@ func gatherMatches(ctx context.Context, cfg baselineConfig, terms []SearchTerm, 
 	// once-per-file operation, not a search-refinement step competing with rg
 	// synonym calls (D16; see docs/bench-methodology.md §5).
 	if cfg.pdftotextBin != "" {
-		pdfs, walkErr := findPDFs(cfg.corpus)
+		pdfs, walkErrs, walkErr := findPDFs(cfg.corpus)
 		if walkErr != nil {
-			// A discovery walk error can hide PDFs from the baseline — surface it
-			// rather than silently under-covering the stratum.
-			fmt.Fprintf(os.Stderr, "  [agentic-grep] PDF discovery under %q errored: %v — PDF coverage may be partial\n", cfg.corpus, walkErr)
+			fmt.Fprintf(os.Stderr, "  [agentic-grep] PDF discovery under %q aborted: %v\n", cfg.corpus, walkErr)
+		}
+		if walkErrs > 0 {
+			// Per-path errors were already logged inside findPDFs; summarize so the
+			// partial-coverage signal is unmissable.
+			fmt.Fprintf(os.Stderr, "  [agentic-grep] %d path(s) unreadable during PDF discovery under %q — PDF-stratum coverage may be partial\n", walkErrs, cfg.corpus)
 		}
 		pdfs = orderPDFsByQuery(pdfs, terms)
 		pdfBudget := clampBudget(cfg.pdfBudget)

@@ -118,3 +118,39 @@ func TestGatherMatchesPDFBudgetIsSeparateField(t *testing.T) {
 		t.Errorf("expected both PDFs extracted under the separate pdfBudget, got %d", extracted)
 	}
 }
+
+// TestFindPDFsCountsWalkErrors — Codex re-review Finding 4: per-entry PDF
+// discovery walk errors must be observable (path logged) and counted, not
+// silently swallowed. A missing root triggers exactly one walk-error callback.
+func TestFindPDFsCountsWalkErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	pdfs, walkErrs, err := findPDFs(missing)
+	if err != nil {
+		t.Fatalf("findPDFs returned a hard error: %v", err)
+	}
+	if len(pdfs) != 0 {
+		t.Errorf("expected no pdfs under a missing root, got %v", pdfs)
+	}
+	if walkErrs == 0 {
+		t.Errorf("expected walkErrs > 0 for an unreadable/missing root, got 0")
+	}
+}
+
+// TestFindPDFsCleanDir — a clean directory yields its .pdf files with zero walk
+// errors (the common path stays correct after the signature change).
+func TestFindPDFsCleanDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.pdf"), []byte("%PDF-1.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pdfs, walkErrs, err := findPDFs(dir)
+	if err != nil || walkErrs != 0 {
+		t.Fatalf("clean dir: err=%v walkErrs=%d", err, walkErrs)
+	}
+	if len(pdfs) != 1 || filepath.Base(pdfs[0]) != "a.pdf" {
+		t.Errorf("expected [a.pdf], got %v", pdfs)
+	}
+}
